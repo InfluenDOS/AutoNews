@@ -60,6 +60,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     } catch {
       /* ignore */
     }
+    if (collapsed) cancelAdd()
   }, [collapsed])
 
   useEffect(() => {
@@ -218,7 +219,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                       </div>
                     ))}
 
-                  {user ? (
+                  {user && !collapsed ? (
                     adding ? (
                       <form
                         ref={addFormRef}
@@ -267,7 +268,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                         <span className="nav-label">添加关键词</span>
                       </button>
                     )
-                  ) : (
+                  ) : !user && !collapsed ? (
                     <span
                       className="side-item side-item-child side-add is-disabled"
                       title="登录后才能添加关键词"
@@ -278,7 +279,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                       </span>
                       <span className="nav-label">添加关键词</span>
                     </span>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </div>
