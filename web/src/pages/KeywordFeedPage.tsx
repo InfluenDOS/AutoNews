@@ -44,15 +44,15 @@ function AiProgressPanel({
       <h3 className="ai-progress-title">AI 处理中</h3>
       <ol className="ai-progress-steps">
         <li className="is-done">已保存关键词{names ? `：${names}` : ''}</li>
-        <li className="is-active">正在扩展检索词（多语言匹配）…</li>
+        <li className="is-active">正在扩展检索词（通常约 3～5 秒）…</li>
         <li className={readyCount > 0 ? 'is-done' : ''}>
           {readyCount > 0
-            ? `已有 ${readyCount} 个词就绪，其余完成后会继续匹配`
-            : '检索词就绪后自动匹配相关新闻'}
+            ? `已有 ${readyCount} 个词就绪，抓取约 1～3 分钟后出新闻`
+            : '扩展完成后会自动抓取匹配新闻'}
         </li>
       </ol>
       <p className="muted ai-progress-hint">
-        添加后会马上扩展并触发一次抓取；整点定时任务照常运行。本页会自动刷新。
+        「扩展」很快；之后的「抓取」是后台 Actions，整点任务不受影响。
       </p>
     </div>
   )

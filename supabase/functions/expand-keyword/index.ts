@@ -5,22 +5,9 @@ const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const EXPAND_SYSTEM = `你是多语种新闻检索助手。用户用中文描述想关注的话题。
-请把意图拆成「检索结构」，用于在巴尔干等外语媒体标题/摘要中命中。
-
-只输出 JSON：
-{
-  "match_mode": "strict" 或 "loose",
-  "match_groups": [["变体A","变体B"], ["变体C","变体D"]],
-  "search_terms": ["可选的完整短语…"],
-  "ai_note": "一句中文说明"
-}
-
-规则：
-1. 短话题：match_mode=loose；search_terms 给 4～10 个多词短语。
-2. 长意图（多要素）：match_mode=strict；match_groups 至少 2 组要素变体。
-3. 不要把过宽单词语单独作为一整组。
-4. 变体用目标媒体常见原文；ai_note 用中文；不要 Markdown。`
+const EXPAND_SYSTEM = `把中文订阅意图转成外语新闻检索 JSON：
+{"match_mode":"loose|strict","match_groups":[["变体"]],"search_terms":["短语"],"ai_note":"一句中文"}
+短话题→loose+4~8个search_terms；多要素长意图→strict+≥2组match_groups。变体用塞/英等原文，忌过宽单词。`
 
 type ExpandResult = {
   match_mode: 'strict' | 'loose'
@@ -72,7 +59,8 @@ async function chatJson(system: string, user: string): Promise<Record<string, un
 
   const payload: Record<string, unknown> = {
     model,
-    temperature: 0.2,
+    temperature: 0.1,
+    max_tokens: 500,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },
@@ -239,6 +227,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}))
     const keywordId = String(body?.keyword_id || '').trim()
     const wantCrawl = body?.trigger_crawl !== false
+    const force = Boolean(body?.force)
     if (!keywordId) {
       return new Response(JSON.stringify({ error: 'keyword_id required' }), {
         status: 400,
@@ -270,7 +259,7 @@ Deno.serve(async (req) => {
     let skipped = false
     let expandedPayload: ExpandResult | null = null
 
-    if (terms.length > 0 || groups.length >= 2) {
+    if (!force && (terms.length > 0 || groups.length >= 2)) {
       skipped = true
     } else {
       const phrase = String(row.phrase || '').trim()
@@ -305,7 +294,19 @@ Deno.serve(async (req) => {
 
     let crawl: { triggered: boolean; reason?: string } = { triggered: false, reason: 'not_requested' }
     if (wantCrawl) {
-      crawl = await maybeTriggerCrawl(admin, user.id)
+      // Don't block expand response on GitHub Actions dispatch
+      const crawlTask = maybeTriggerCrawl(admin, user.id).then((result) => {
+        crawl = result
+        return result
+      })
+      const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } })
+        .EdgeRuntime
+      if (runtime?.waitUntil) {
+        runtime.waitUntil(crawlTask)
+        crawl = { triggered: true, reason: 'scheduled' }
+      } else {
+        crawl = await crawlTask
+      }
     }
 
     return new Response(

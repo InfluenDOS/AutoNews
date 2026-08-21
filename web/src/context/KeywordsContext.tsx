@@ -78,15 +78,13 @@ export function KeywordsProvider({ children }: { children: ReactNode }) {
       if (error) return { error: error.message }
       const id = data?.id as string | undefined
       if (id) {
-        // Expand now + fire one on-demand crawl (hourly schedule unchanged)
-        void supabase.functions
-          .invoke('expand-keyword', {
-            body: { keyword_id: id, trigger_crawl: true },
-          })
-          .then(() => refresh())
-          .catch(() => {
-            /* expand-keywords.yml / hourly crawl as backup */
-          })
+        // Await expand only (~几秒); crawl is kicked off in the background by the function
+        const { error: fnErr } = await supabase.functions.invoke('expand-keyword', {
+          body: { keyword_id: id, trigger_crawl: true, force: true },
+        })
+        if (fnErr) {
+          console.warn('expand-keyword failed', fnErr)
+        }
       }
       await refresh()
       return { id }

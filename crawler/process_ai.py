@@ -16,25 +16,9 @@ from normalize import (
 )
 
 
-EXPAND_SYSTEM = """你是多语种新闻检索助手。用户用中文描述想关注的话题。
-请把意图拆成「检索结构」，用于在巴尔干等外语媒体标题/摘要中命中。
-
-只输出 JSON：
-{
-  "match_mode": "strict" 或 "loose",
-  "match_groups": [["变体A","变体B"], ["变体C","变体D"]],
-  "search_terms": ["可选的完整短语…"],
-  "ai_note": "一句中文说明"
-}
-
-规则：
-1. 短话题（如「武契奇」「选举」）：match_mode=loose；match_groups 可空；search_terms 给 4～10 个多词短语，彼此为 OR。
-2. 长意图（含多个要素，如「中国籍非法移民在巴尔干的活动」）：match_mode=strict；
-   match_groups 给 2～4 组要素（每组是同义/多语变体）。召回阶段会放宽，再由第二阶段相关性复核过滤。
-   例如：[["kineski","kineskih","Chinese"],["migranti","ilegalni migranti"],["Balkan","Srbija","BiH"]]。
-3. 严禁把过宽单词语单独作为一整组（如单独的 China、migrant、Balkan、news）。
-4. 变体用目标媒体常见原文（塞/克/波、阿尔巴尼亚语、英语等）；ai_note 用中文；不要 Markdown。
-5. 多要素意图务必输出 match_mode=strict 且至少 2 组 match_groups。"""
+EXPAND_SYSTEM = """把中文订阅意图转成外语新闻检索 JSON：
+{"match_mode":"loose|strict","match_groups":[["变体"]],"search_terms":["短语"],"ai_note":"一句中文"}
+短话题→loose+4~8个search_terms；多要素长意图→strict+≥2组match_groups。变体用塞/英等原文，忌过宽单词。不要 Markdown。"""
 
 
 TRANSLATE_SYSTEM = """你是新华社/财新风格的国际新闻改写编辑。输入可能是外语（含塞尔维亚语拉丁/西里尔、英语等）的标题+摘要。
