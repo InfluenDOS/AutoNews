@@ -17,9 +17,22 @@ from normalize import (
 )
 
 
-EXPAND_SYSTEM = """把中文订阅意图转成外语新闻检索 JSON：
-{"match_mode":"loose|strict","match_groups":[["变体"]],"search_terms":["短语"],"ai_note":"一句中文"}
-短话题→loose+4~8个search_terms；多要素长意图→strict+≥2组match_groups。变体用塞/英等原文，忌过宽单词。不要 Markdown。"""
+EXPAND_SYSTEM = """你是巴尔干多语种新闻检索助手。用户用中文描述订阅意图。
+只输出 JSON：
+{
+  "match_mode": "loose" 或 "strict",
+  "match_groups": [["variantA","variantB"], ["variantC"]],
+  "search_terms": ["phrase1","phrase2"],
+  "ai_note": "一句中文说明"
+}
+
+硬性规则：
+1. match_groups / search_terms 必须是目标媒体原文检索词（塞尔维亚语拉丁字母、克罗地亚语、波斯尼亚语、英语等），严禁中文。
+2. 短话题（如「武契奇」「选举」）：match_mode=loose；search_terms 给 6～10 个多词短语（OR）；match_groups 可空。
+3. 长意图/多要素（如「中国籍非法移民在塞尔维亚」）：match_mode=strict；match_groups 至少 2～4 组要素（组间 AND，组内变体 OR）。
+   示例：[["kineski","kineskih","Chinese","Kinezi"],["ilegalni migranti","ilegalne migracije","illegal migrants"],["Srbija","Srbiji","Serbia"]]。
+4. 不要把过宽单词单独成组（如单独的 China、migrant、Balkan、news、Serbia）。
+5. ai_note 用中文；不要 Markdown。"""
 
 
 TRANSLATE_SYSTEM = """你是新华社/财新风格的国际新闻改写编辑。输入可能是外语（含塞尔维亚语拉丁/西里尔、英语等）的标题+摘要。
@@ -43,18 +56,47 @@ TRANSLATE_SYSTEM = """你是新华社/财新风格的国际新闻改写编辑。
 7. 不要 Markdown，不要解释。"""
 
 
+def _ensure_intent_locations(phrase: str, groups: list[list[str]]) -> list[list[str]]:
+    """If the Chinese intent names a place, keep a foreign-language location group."""
+    flat = " ".join(alt for g in groups for alt in g).casefold()
+    out = list(groups)
+    if any(x in phrase for x in ("塞尔维亚", "塞国")) or "serbia" in phrase.casefold():
+        if not any(x in flat for x in ("srbij", "serbia")):
+            out.append(["Srbija", "Srbiji", "Serbia", "Serbian"])
+    if "巴尔干" in phrase and not any(x in flat for x in ("balkan", "balkan")):
+        out.append(["Balkan", "Balkanu", "Western Balkans"])
+    return out[:6]
+
+
 def expand_keyword_phrase(phrase: str) -> dict[str, Any]:
     suggested = suggest_match_mode(phrase)
     data = chat_json(
         EXPAND_SYSTEM,
-        f"用户输入：{phrase}\n（系统建议 match_mode={suggested}，长意图请用 strict+match_groups）",
+        (
+            f"用户输入：{phrase}\n"
+            f"（建议 match_mode={suggested}；检索词必须是塞/英等原文，不要中文；"
+            f"若意图含地点，match_groups 必须单独有一组地点变体）"
+        ),
     )
 
     groups = clean_match_groups(data.get("match_groups"))
+    # Drop any Chinese leftovers from a bad model response
+    groups = [
+        [alt for alt in g if not any("\u4e00" <= ch <= "\u9fff" for ch in alt)]
+        for g in groups
+    ]
+    groups = [g for g in groups if g]
+    groups = _ensure_intent_locations(phrase, groups)
+
     terms_raw = data.get("search_terms") or []
     if not isinstance(terms_raw, list):
         terms_raw = []
-    terms = expand_match_terms(phrase, [str(t) for t in terms_raw])
+    terms_raw = [
+        str(t)
+        for t in terms_raw
+        if str(t).strip() and not any("\u4e00" <= ch <= "\u9fff" for ch in str(t))
+    ]
+    terms = expand_match_terms(phrase, terms_raw)
 
     ai_mode = str(data.get("match_mode") or "").strip()
     want_strict = (ai_mode == "strict" or suggested == "strict") and len(groups) >= 2
@@ -73,7 +115,7 @@ def expand_keyword_phrase(phrase: str) -> dict[str, Any]:
         mode = "loose"
         groups = []
         if not terms:
-            terms = [phrase]
+            terms = terms_raw[:8] or [phrase]
 
     note = str(data.get("ai_note") or "").strip()[:300]
     return {

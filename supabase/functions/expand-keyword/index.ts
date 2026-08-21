@@ -5,9 +5,16 @@ const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const EXPAND_SYSTEM = `把中文订阅意图转成外语新闻检索 JSON：
-{"match_mode":"loose|strict","match_groups":[["变体"]],"search_terms":["短语"],"ai_note":"一句中文"}
-短话题→loose+4~8个search_terms；多要素长意图→strict+≥2组match_groups。变体用塞/英等原文，忌过宽单词。`
+const EXPAND_SYSTEM = `你是巴尔干多语种新闻检索助手。用户用中文描述订阅意图。
+只输出 JSON：
+{"match_mode":"loose|strict","match_groups":[["variantA","variantB"]],"search_terms":["phrase"],"ai_note":"一句中文"}
+
+硬性规则：
+1. match_groups/search_terms 必须是目标媒体原文（塞语拉丁字母/英语等），严禁中文。
+2. 短话题→loose，6～10个多词 search_terms。
+3. 多要素长意图→strict，2～4组 match_groups（组间AND，组内OR）。
+   例：[["kineski","Chinese","Kinezi"],["ilegalni migranti","illegal migrants"],["Srbija","Serbia"]]。
+4. 不要把过宽单词单独成组。ai_note用中文；不要Markdown。`
 
 type ExpandResult = {
   match_mode: 'strict' | 'loose'
