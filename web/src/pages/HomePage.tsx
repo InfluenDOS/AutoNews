@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArticleCard } from '../components/ArticleCard'
-import { PoetryOrnament } from '../components/PoetryOrnament'
 import { Spinner } from '../components/Spinner'
+import { VisualStage } from '../components/VisualStage'
 import { useAuth } from '../context/AuthContext'
 import { useKeywordWorkspace } from '../context/KeywordWorkspace'
 import { useToast } from '../context/ToastContext'
@@ -162,11 +162,7 @@ export function HomePage() {
 
   return (
     <section className="feed">
-      <div className="hero-band" aria-hidden="true">
-        <img src="./images/balkan-coast.jpg" alt="" className="hero-band-img" />
-        <div className="hero-band-veil" />
-        <PoetryOrnament variant="panel" seed={selected?.id.length ?? 5} className="hero-poem" />
-      </div>
+      <VisualStage src="./images/balkan-coast.jpg" variant="hero" />
 
       <div className="feed-header">
         <div>
@@ -229,30 +225,28 @@ export function HomePage() {
           </div>
           {articles.length === 0 && (
             <div className="empty empty-scenic">
-              <img src="./images/mountain-mist.jpg" alt="" className="empty-photo" />
-              <div>
+              <VisualStage src="./images/mountain-mist.jpg" variant="empty" />
+              <div className="empty-copy">
                 <p>暂无公开要闻</p>
                 <p className="muted">
                   <Link to="/auth">登录</Link> 后创建专题，即可开始订阅。
                 </p>
-                <PoetryOrnament variant="panel" seed={9} />
               </div>
             </div>
           )}
         </>
       ) : !selected ? (
         <div className="empty empty-scenic">
-          <img src="./images/old-town.jpg" alt="" className="empty-photo" />
-          <div>
+          <VisualStage src="./images/old-town.jpg" variant="empty" />
+          <div className="empty-copy">
             <p>尚未选择专题</p>
             <p className="muted">使用左侧「+」创建关注主题，即可在此阅读对应新闻。</p>
-            <PoetryOrnament variant="panel" seed={2} />
           </div>
         </div>
       ) : visible.length === 0 ? (
         <div className="empty empty-scenic">
-          <img src="./images/reading-desk.jpg" alt="" className="empty-photo" />
-          <div>
+          <VisualStage src="./images/reading-desk.jpg" variant="empty" />
+          <div className="empty-copy">
             {pendingSelected ? (
               <>
                 <p>专题准备中</p>
@@ -267,7 +261,6 @@ export function HomePage() {
                 </p>
               </>
             )}
-            <PoetryOrnament variant="panel" seed={selected.id.length + 4} />
           </div>
         </div>
       ) : (
