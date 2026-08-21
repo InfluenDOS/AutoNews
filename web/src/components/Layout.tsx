@@ -18,7 +18,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <span className="side-logo">AN</span>
           <span>
             <strong>AutoNews</strong>
-            <small>塞尔维亚关键词新闻</small>
+            <small>巴尔干关键词新闻</small>
           </span>
         </Link>
 
@@ -43,7 +43,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
         <div className="side-tip">
           <strong>今日提示</strong>
-          <p>用中文写一句关注点，系统会自动匹配塞尔维亚相关报道并译成中文。</p>
+          <p>用中文写一句关注点，系统会自动匹配巴尔干半岛主流媒体报道并译成中文。</p>
         </div>
       </aside>
 

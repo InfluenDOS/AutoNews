@@ -1,4 +1,4 @@
-name: Crawl Serbian news RSS
+name: Crawl Balkan news RSS
 
 on:
   schedule:
@@ -8,7 +8,7 @@ on:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
