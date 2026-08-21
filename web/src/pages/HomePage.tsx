@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArticleCard } from '../components/ArticleCard'
 import { useAuth } from '../context/AuthContext'
+import { requestCrawl } from '../lib/crawl'
 import { articleMatchesKeywords, keywordMatchTerms } from '../lib/normalize'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Article, Keyword } from '../types'
@@ -74,18 +75,9 @@ export function HomePage() {
     setCrawling(true)
     setError(null)
     setInfo(null)
-    const { data, error: err } = await supabase.rpc('enqueue_crawl')
-    if (err) {
-      const raw = err.message || ''
-      if (raw.includes('wait 2 minutes')) setError('请稍等 2 分钟再手动抓取')
-      else if (raw.includes('sign in')) setError('请先登录')
-      else setError(raw)
-      setCrawling(false)
-      return
-    }
-    const row = data as { status?: string; message?: string } | null
-    if (row?.status === 'error' || row?.message === 'missing_github_token') {
-      setError('手动抓取尚未配置完成，请稍后再试或联系管理员')
+    const result = await requestCrawl()
+    if (!result.ok) {
+      setError(result.message)
       setCrawling(false)
       return
     }
