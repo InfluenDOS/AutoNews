@@ -5,6 +5,8 @@ export type Article = {
   summary: string
   title_zh?: string
   summary_zh?: string
+  lead_zh?: string
+  body_zh?: string
   url: string
   published_at: string | null
   raw_text_normalized: string

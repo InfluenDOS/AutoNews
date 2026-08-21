@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from typing import Any
 
@@ -15,28 +16,30 @@ EXPAND_SYSTEM = """你是塞尔维亚新闻检索助手。用户会用中文描�
 
 要求：
 1. 输出 JSON：{"search_terms":["..."],"ai_note":"..."}
-2. search_terms：6～15 个词，必须包含：
-   - 若干短词/单词（更容易命中标题），例如 Kina、kineski、migranti、imigranti、Balkan、Srbija
-   - 若干 2～4 词短语
-   - 重要专名同时给拉丁与西里尔写法
-3. 不要使用过于宽泛、几乎每条新闻都会命中的词（如 Srbija、Balkan、Beograd、vesti）作为单独检索词。
-4. 把中文人名/机构/事件映射到塞尔维亚媒体常用写法。
-5. ai_note：用一句中文说明你如何理解用户意图。
-6. 不要只输出很长的完整句子；短词优先；不要 Markdown。"""
+2. search_terms：6～15 个词，必须包含短词与短语；重要专名给拉丁与西里尔写法。
+3. 不要单独使用过宽词（Srbija、Balkan、Beograd、vesti）。
+4. ai_note：一句中文说明理解；不要 Markdown。"""
 
 
-TRANSLATE_SYSTEM = """你是资深国际新闻中文编辑，擅长把塞尔维亚语（拉丁/西里尔）或英语新闻改写成中国读者习惯阅读的简体中文。
+TRANSLATE_SYSTEM = """你是新华社/财新风格的国际新闻改写编辑。输入可能是塞尔维亚语（拉丁或西里尔）或英语的耸动标题+摘要。
+你的任务不是逐词翻译，而是先理解事实，再用通顺的简体中文写成一篇可独立阅读的短讯。
 
-输出 JSON：{"items":[{"id":"...","title_zh":"...","summary_zh":"..."}]}
+只输出 JSON：
+{
+  "title_zh": "中文标题",
+  "lead_zh": "一句话导语",
+  "summary_zh": "列表用短摘要（40～80字）",
+  "body_zh": "详情正文，2～4个自然段，用\\n\\n分段"
+}
 
-翻译标准：
-1. 标题像国内门户新闻：简洁、通顺、有信息量；不要逐词硬译，不要欧化长句。
-2. summary_zh 是站内「新闻详情」正文：用自然中文写 3～6 句完整段落，说清人物、时间、地点、事件与结果；可读性强，像一篇短讯，不要只剩一句话。
-3. 专名处理：
-   - 常见人名用通行译名：Vučić/Вучић→武契奇，Aleksandar→亚历山大，Beograd→贝尔格莱德，Srbija→塞尔维亚，Kosovo→科索沃，EU→欧盟，NATO→北约
-   - 不常见专名：中文译名 + 括号保留原文，例如「布尔纳比奇（Brnabić）」
-4. 不要机翻腔；不要添加原文没有的评论或猜测；不要 Markdown、不要解释过程。
-5. 信息只来自给定标题与摘要，可重组语句，不可虚构情节。"""
+硬性规则：
+1. 标题：像国内新闻客户端，15～28字为宜；去掉原文全大写、感叹号堆砌、标题党腔。
+2. 导语：一句话交代「谁、做了什么、结果/影响」。
+3. 正文：完整可读，包含背景与关键细节；语气冷静客观，像正式报道，不要口语、不要网感梗。
+4. 人名地名用通行中文：Vučić/Вучић=武契奇，Beograd=贝尔格莱德，Srbija=塞尔维亚，Kosovo=科索沃，EU=欧盟，NATO=北约，dinar=第纳尔。生僻名用「中文（原文）」。
+5. 严禁机翻腔：不要「进行了…的表示」「关于…一事」「据报道称称」；不要把塞尔维亚语词序硬搬进中文。
+6. 只使用输入里有的信息，可改写重组，不可编造数字、引语、原因。
+7. 不要 Markdown，不要解释。"""
 
 
 def expand_keyword_phrase(phrase: str) -> dict[str, Any]:
@@ -82,7 +85,6 @@ def process_keywords(limit: int = 30, force: bool = False) -> int:
             expanded = expand_keyword_phrase(phrase)
             terms = expanded["search_terms"]
             if not terms:
-                # Fallback: keep original phrase as term
                 terms = [phrase]
             normalized = " ".join(normalize_for_match(t) for t in terms)
             sb.table("keywords").update(
@@ -99,61 +101,92 @@ def process_keywords(limit: int = 30, force: bool = False) -> int:
     return done
 
 
+def _has_body_column(sb: Any) -> bool:
+    try:
+        sb.table("articles").select("body_zh").limit(1).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def translate_one(article: dict[str, Any]) -> dict[str, str] | None:
+    user = (
+        "请改写下面这条新闻为中文短讯 JSON（含 title_zh/lead_zh/summary_zh/body_zh）：\n"
+        + json.dumps(
+            {
+                "title": article.get("title") or "",
+                "summary": (article.get("summary") or "")[:1200],
+            },
+            ensure_ascii=False,
+        )
+    )
+    data = chat_json(TRANSLATE_SYSTEM, user, temperature=0.25)
+    title_zh = str(data.get("title_zh") or "").strip()[:120]
+    lead_zh = str(data.get("lead_zh") or "").strip()[:300]
+    summary_zh = str(data.get("summary_zh") or "").strip()[:200]
+    body_zh = str(data.get("body_zh") or "").strip()[:5000]
+    if not title_zh:
+        return None
+    if not body_zh:
+        body_zh = "\n\n".join(x for x in [lead_zh, summary_zh] if x)
+    if not summary_zh:
+        summary_zh = (lead_zh or body_zh)[:80]
+    if not lead_zh and body_zh:
+        lead_zh = body_zh.split("\n\n", 1)[0][:120]
+    return {
+        "title_zh": title_zh,
+        "lead_zh": lead_zh,
+        "summary_zh": summary_zh,
+        "body_zh": body_zh,
+    }
+
+
 def translate_articles(limit: int = 40, force: bool = False) -> int:
     sb = get_supabase()
+    with_body = _has_body_column(sb)
+    select_cols = "id, title, summary, title_zh, body_zh" if with_body else "id, title, summary, title_zh"
     result = (
         sb.table("articles")
-        .select("id, title, summary, title_zh")
+        .select(select_cols)
         .order("published_at", desc=True)
         .limit(120)
         .execute()
     )
     rows = result.data or []
     if not force:
-        rows = [r for r in rows if not (r.get("title_zh") or "").strip()]
+        if with_body:
+            rows = [r for r in rows if not (r.get("body_zh") or "").strip()]
+        else:
+            rows = [r for r in rows if not (r.get("title_zh") or "").strip()]
     rows = rows[:limit]
-    print(f"Articles pending Chinese translation: {len(rows)} (force={force})")
+    print(f"Articles pending Chinese rewrite: {len(rows)} (force={force}, body_col={with_body})")
     if not rows:
         return 0
 
     done = 0
-    batch_size = 5
-    for i in range(0, len(rows), batch_size):
-        batch = rows[i : i + batch_size]
-        payload = {
-            "items": [
-                {
-                    "id": r["id"],
-                    "title": r.get("title") or "",
-                    "summary": (r.get("summary") or "")[:800],
-                }
-                for r in batch
-            ]
-        }
+    for idx, row in enumerate(rows, start=1):
         try:
-            data = chat_json(
-                TRANSLATE_SYSTEM,
-                "请把下列新闻改写成高质量简体中文标题与摘要。只输出 JSON。\n"
-                + str(payload),
-                temperature=0.2,
-            )
-            items = data.get("items") or []
-            by_id = {str(it.get("id")): it for it in items if isinstance(it, dict)}
-            for r in batch:
-                it = by_id.get(str(r["id"]))
-                if not it:
-                    continue
-                title_zh = str(it.get("title_zh") or "").strip()[:500]
-                summary_zh = str(it.get("summary_zh") or "").strip()[:2000]
-                if not title_zh:
-                    continue
-                sb.table("articles").update(
-                    {"title_zh": title_zh, "summary_zh": summary_zh}
-                ).eq("id", r["id"]).execute()
-                done += 1
-            print(f"  translated batch {i // batch_size + 1}: +{len(by_id)}")
+            out = translate_one(row)
+            if not out:
+                print(f"  skip empty result for {row.get('id')}")
+                continue
+            payload: dict[str, str] = {
+                "title_zh": out["title_zh"],
+                "summary_zh": out["summary_zh"],
+            }
+            if with_body:
+                payload["lead_zh"] = out["lead_zh"]
+                payload["body_zh"] = out["body_zh"]
+            else:
+                # Fallback: pack lead+body into summary_zh for older schema
+                payload["summary_zh"] = "\n\n".join(
+                    x for x in [out["lead_zh"], out["body_zh"]] if x
+                )[:4000]
+            sb.table("articles").update(payload).eq("id", row["id"]).execute()
+            done += 1
+            print(f"  [{idx}/{len(rows)}] {out['title_zh']}")
         except Exception as exc:  # noqa: BLE001
-            print(f"  FAILED translate batch: {exc}", file=sys.stderr)
+            print(f"  FAILED {row.get('id')}: {exc}", file=sys.stderr)
     return done
 
 

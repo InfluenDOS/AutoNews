@@ -12,7 +12,7 @@
   --ok: #3dd68c;
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
   --radius: 16px;
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: 'Noto Sans SC', 'Segoe UI', system-ui, sans-serif;
   line-height: 1.5;
   font-weight: 400;
   color: var(--text);
@@ -405,6 +405,107 @@ input:focus {
 .article-detail {
   max-width: 760px;
   margin: 0 auto;
+}
+
+.reader {
+  width: min(720px, 100%);
+  margin: 0 auto;
+  padding: 0.25rem 0 2rem;
+}
+
+.reader-header {
+  margin-bottom: 1.75rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.reader-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.reader-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.45rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin-bottom: 0.85rem;
+}
+
+.reader-kicker .dot {
+  opacity: 0.5;
+}
+
+.reader-title {
+  margin: 0 0 1rem;
+  font-family: 'Noto Serif SC', 'Noto Sans SC', serif;
+  font-size: clamp(1.7rem, 4vw, 2.35rem);
+  font-weight: 700;
+  line-height: 1.28;
+  letter-spacing: 0.01em;
+}
+
+.reader-lead {
+  margin: 0;
+  font-size: 1.12rem;
+  line-height: 1.7;
+  color: #c5d0dc;
+  font-weight: 500;
+}
+
+.reader-body {
+  font-family: 'Noto Serif SC', 'Noto Sans SC', serif;
+  font-size: 1.12rem;
+  line-height: 1.9;
+  color: var(--text);
+}
+
+.reader-body p {
+  margin: 0 0 1.15rem;
+  text-align: justify;
+  text-justify: inter-ideograph;
+}
+
+.reader-body p:first-child::first-letter {
+  font-size: 1.15em;
+  font-weight: 700;
+}
+
+.reader-original-title {
+  margin: 1.5rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--border);
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.reader-footer {
+  margin-top: 2rem;
+}
+
+.origin-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1.15rem 1.2rem 1.25rem;
+}
+
+.origin-card h2 {
+  margin: 0 0 0.45rem;
+  font-size: 1rem;
+}
+
+.origin-card p {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.6;
 }
 
 .detail-top {

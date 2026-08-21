@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
@@ -14,6 +14,11 @@ function formatDate(value: string | null) {
   } catch {
     return value
   }
+}
+
+function readingMinutes(text: string) {
+  const chars = text.replace(/\s/g, '').length
+  return Math.max(1, Math.ceil(chars / 400))
 }
 
 export function ArticleDetailPage() {
@@ -78,75 +83,101 @@ export function ArticleDetailPage() {
     }
   }
 
+  const title = useMemo(
+    () => ((article?.title_zh || '').trim() || article?.title || ''),
+    [article],
+  )
+  const lead = useMemo(() => (article?.lead_zh || '').trim(), [article])
+  const bodyText = useMemo(() => {
+    const body = (article?.body_zh || '').trim()
+    if (body) return body
+    return (article?.summary_zh || '').trim() || (article?.summary || '').trim()
+  }, [article])
+  const paragraphs = useMemo(
+    () => bodyText.split(/\n\n+/).map((p) => p.trim()).filter(Boolean),
+    [bodyText],
+  )
+
   if (loading) {
     return (
-      <section className="panel article-detail">
-        <p className="muted">加载中…</p>
-      </section>
+      <article className="reader">
+        <p className="muted">正在打开报道…</p>
+      </article>
     )
   }
 
   if (!article) {
     return (
-      <section className="panel article-detail">
+      <article className="reader">
         <p className="error">{error || '未找到这篇新闻。'}</p>
         <Link to="/" className="btn btn-sm">
           返回列表
         </Link>
-      </section>
+      </article>
     )
   }
 
-  const title = (article.title_zh || '').trim() || article.title
-  const body = (article.summary_zh || '').trim() || article.summary || '暂无中文正文，请稍后再看或查看原文。'
   const translated = Boolean((article.title_zh || '').trim())
 
   return (
-    <section className="panel article-detail">
-      <div className="detail-top">
-        <Link to="/" className="linkish">
-          ← 返回列表
-        </Link>
-        {user && (
-          <button
-            type="button"
-            className={`star-btn wide ${starred ? 'on' : ''}`}
-            onClick={() => void toggleStar()}
-            aria-label={starred ? '取消收藏' : '加入收藏'}
-          >
-            {starred ? '★ 已收藏' : '☆ 收藏'}
-          </button>
+    <article className="reader">
+      <header className="reader-header">
+        <div className="reader-nav">
+          <Link to="/" className="linkish">
+            ← 返回列表
+          </Link>
+          {user && (
+            <button
+              type="button"
+              className={`star-btn wide ${starred ? 'on' : ''}`}
+              onClick={() => void toggleStar()}
+            >
+              {starred ? '★ 已收藏' : '☆ 收藏'}
+            </button>
+          )}
+        </div>
+
+        <div className="reader-kicker">
+          <span className="source">{article.source}</span>
+          <span className="dot">·</span>
+          <time dateTime={article.published_at ?? undefined}>{formatDate(article.published_at)}</time>
+          <span className="dot">·</span>
+          <span>约 {readingMinutes(lead + bodyText)} 分钟阅读</span>
+        </div>
+
+        <h1 className="reader-title">{title}</h1>
+
+        {lead ? <p className="reader-lead">{lead}</p> : null}
+
+        {!translated && (
+          <p className="card-hint">中文改写尚未完成，正文可能仍接近原文摘要。</p>
         )}
-      </div>
+      </header>
 
-      <div className="card-meta detail-meta">
-        <span className="source">{article.source}</span>
-        <time dateTime={article.published_at ?? undefined}>{formatDate(article.published_at)}</time>
-      </div>
-
-      <h1 className="detail-title">{title}</h1>
-
-      {!translated && <p className="card-hint">中文译文生成中，下方可能仍显示原文摘要。</p>}
-
-      <div className="detail-body">
-        {body.split(/\n+/).map((para, i) => (
+      <div className="reader-body">
+        {paragraphs.map((para, i) => (
           <p key={i}>{para}</p>
         ))}
       </div>
 
+      {article.title && article.title !== title && (
+        <p className="reader-original-title">原标题：{article.title}</p>
+      )}
+
       {error && <p className="error">{error}</p>}
 
-      <div className="detail-footer">
-        <p className="muted">本页为 AI 根据媒体摘要改写的中文阅读版，非原文全文转载。</p>
-        <a
-          className="btn"
-          href={article.url}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          查看原文链接
-        </a>
-      </div>
-    </section>
+      <footer className="reader-footer">
+        <div className="origin-card">
+          <h2>原文出处</h2>
+          <p>
+            本页为根据公开 RSS 标题与摘要改写的中文阅读版，便于家人快速了解，并非媒体全文转载。
+            完整报道与图片请打开原站。
+          </p>
+          <a className="btn" href={article.url} target="_blank" rel="noopener noreferrer">
+            打开原文 · {article.source}
+          </a>
+        </div>
+      </footer>
+    </article>
   )
 }
