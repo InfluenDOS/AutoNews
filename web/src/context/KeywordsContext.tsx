@@ -78,12 +78,14 @@ export function KeywordsProvider({ children }: { children: ReactNode }) {
       if (error) return { error: error.message }
       const id = data?.id as string | undefined
       if (id) {
-        // Expand immediately via Edge Function (don't wait for hourly crawl)
+        // Expand now + fire one on-demand crawl (hourly schedule unchanged)
         void supabase.functions
-          .invoke('expand-keyword', { body: { keyword_id: id } })
+          .invoke('expand-keyword', {
+            body: { keyword_id: id, trigger_crawl: true },
+          })
           .then(() => refresh())
           .catch(() => {
-            /* backup: expand-keywords.yml every 10m */
+            /* expand-keywords.yml / hourly crawl as backup */
           })
       }
       await refresh()

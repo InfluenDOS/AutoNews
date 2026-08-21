@@ -153,6 +153,55 @@ function normalizeExpand(phrase: string, data: Record<string, unknown>): ExpandR
   }
 }
 
+async function maybeTriggerCrawl(
+  admin: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<{ triggered: boolean; reason?: string }> {
+  const token = Deno.env.get('GITHUB_TOKEN')?.trim()
+  const repo = (Deno.env.get('GITHUB_REPO') || 'InfluenDOS/AutoNews').trim()
+  const workflow = (Deno.env.get('GITHUB_WORKFLOW') || 'crawl.yml').trim()
+  if (!token) return { triggered: false, reason: 'missing_github_token' }
+
+  const cooldownSec = Number(Deno.env.get('CRAWL_COOLDOWN_SEC') || '90')
+  const { data: cool } = await admin
+    .from('crawl_dispatch_cooldown')
+    .select('last_triggered_at')
+    .eq('id', 1)
+    .maybeSingle()
+
+  if (cool?.last_triggered_at) {
+    const elapsed = Date.now() - new Date(cool.last_triggered_at).getTime()
+    if (elapsed < cooldownSec * 1000) {
+      return { triggered: false, reason: 'cooldown' }
+    }
+  }
+
+  const url = `https://api.github.com/repos/${repo}/actions/workflows/${workflow}/dispatches`
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ ref: 'main' }),
+  })
+
+  if (!resp.ok) {
+    const text = await resp.text()
+    return { triggered: false, reason: `github_${resp.status}:${text.slice(0, 120)}` }
+  }
+
+  await admin.from('crawl_dispatch_cooldown').upsert({
+    id: 1,
+    last_triggered_at: new Date().toISOString(),
+    last_by: userId,
+  })
+
+  return { triggered: true }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -189,6 +238,7 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}))
     const keywordId = String(body?.keyword_id || '').trim()
+    const wantCrawl = body?.trigger_crawl !== false
     if (!keywordId) {
       return new Response(JSON.stringify({ error: 'keyword_id required' }), {
         status: 400,
@@ -217,48 +267,55 @@ Deno.serve(async (req) => {
 
     const terms = (row.search_terms as string[] | null) || []
     const groups = cleanGroups(row.match_groups)
+    let skipped = false
+    let expandedPayload: ExpandResult | null = null
+
     if (terms.length > 0 || groups.length >= 2) {
-      return new Response(JSON.stringify({ ok: true, skipped: true }), {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      skipped = true
+    } else {
+      const phrase = String(row.phrase || '').trim()
+      if (!phrase) {
+        return new Response(JSON.stringify({ error: 'empty phrase' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+
+      const suggested = suggestMatchMode(phrase)
+      const raw = await chatJson(
+        EXPAND_SYSTEM,
+        `用户输入：${phrase}\n（系统建议 match_mode=${suggested}，长意图请用 strict+match_groups）`,
+      )
+      expandedPayload = normalizeExpand(phrase, raw)
+      const normalized = expandedPayload.search_terms.join(' ').slice(0, 2000) || phrase
+
+      const { error: updErr } = await admin
+        .from('keywords')
+        .update({
+          search_terms: expandedPayload.search_terms,
+          match_groups: expandedPayload.match_groups,
+          match_mode: expandedPayload.match_mode,
+          ai_note: expandedPayload.ai_note,
+          normalized_phrase: normalized,
+        })
+        .eq('id', keywordId)
+
+      if (updErr) throw updErr
     }
 
-    const phrase = String(row.phrase || '').trim()
-    if (!phrase) {
-      return new Response(JSON.stringify({ error: 'empty phrase' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    let crawl: { triggered: boolean; reason?: string } = { triggered: false, reason: 'not_requested' }
+    if (wantCrawl) {
+      crawl = await maybeTriggerCrawl(admin, user.id)
     }
-
-    const suggested = suggestMatchMode(phrase)
-    const raw = await chatJson(
-      EXPAND_SYSTEM,
-      `用户输入：${phrase}\n（系统建议 match_mode=${suggested}，长意图请用 strict+match_groups）`,
-    )
-    const expanded = normalizeExpand(phrase, raw)
-    const normalized = expanded.search_terms.join(' ').slice(0, 2000) || phrase
-
-    const { error: updErr } = await admin
-      .from('keywords')
-      .update({
-        search_terms: expanded.search_terms,
-        match_groups: expanded.match_groups,
-        match_mode: expanded.match_mode,
-        ai_note: expanded.ai_note,
-        normalized_phrase: normalized,
-      })
-      .eq('id', keywordId)
-
-    if (updErr) throw updErr
 
     return new Response(
       JSON.stringify({
         ok: true,
-        match_mode: expanded.match_mode,
-        search_terms: expanded.search_terms,
-        match_groups: expanded.match_groups,
+        skipped,
+        match_mode: expandedPayload?.match_mode,
+        search_terms: expandedPayload?.search_terms,
+        match_groups: expandedPayload?.match_groups,
+        crawl,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     )

@@ -2,7 +2,7 @@ name: Crawl keyword news RSS
 
 on:
   schedule:
-    # Hourly — pairs with stage-2 relevance scoring to control AI cost
+    # Fixed hourly crawl (independent of on-demand runs from Edge Function)
     - cron: "0 * * * *"
   workflow_dispatch:
 
