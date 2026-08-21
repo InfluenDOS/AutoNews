@@ -25,9 +25,18 @@ EXPAND_SYSTEM = """你是塞尔维亚新闻检索助手。用户会用中文描�
 6. 不要只输出很长的完整句子；短词优先；不要 Markdown。"""
 
 
-TRANSLATE_SYSTEM = """你是新闻翻译助手。把塞尔维亚语（或英文）新闻标题与摘要译成简体中文。
+TRANSLATE_SYSTEM = """你是资深国际新闻中文编辑，擅长把塞尔维亚语（拉丁/西里尔）或英语新闻改写成中国读者习惯阅读的简体中文。
+
 输出 JSON：{"items":[{"id":"...","title_zh":"...","summary_zh":"..."}]}
-要求：忠实、简洁；专名可保留原文并在首次出现后加中文；summary_zh 可压缩到两句以内；不要 Markdown。"""
+
+翻译标准：
+1. 标题像国内门户新闻：简洁、通顺、有信息量；不要逐词硬译，不要欧化长句。
+2. 摘要用自然中文写 1～2 句，保留关键事实（人物、地点、事件、结果），删掉无信息套话。
+3. 专名处理：
+   - 常见人名用通行译名：Vučić/Вучић→武契奇，Aleksandar→亚历山大，Beograd→贝尔格莱德，Srbija→塞尔维亚，Kosovo→科索沃，EU→欧盟，NATO→北约
+   - 不常见专名：中文译名 + 括号保留原文，例如「布尔纳比奇（Brnabić）」
+4. 不要机翻腔（少用「被进行」「关于…的问题」「据悉称」这类别扭说法）。
+5. 不要添加原文没有的评论或猜测；不要 Markdown、不要解释过程。"""
 
 
 def expand_keyword_phrase(phrase: str) -> dict[str, Any]:
@@ -90,7 +99,7 @@ def process_keywords(limit: int = 30, force: bool = False) -> int:
     return done
 
 
-def translate_articles(limit: int = 40) -> int:
+def translate_articles(limit: int = 40, force: bool = False) -> int:
     sb = get_supabase()
     result = (
         sb.table("articles")
@@ -99,13 +108,16 @@ def translate_articles(limit: int = 40) -> int:
         .limit(120)
         .execute()
     )
-    rows = [r for r in (result.data or []) if not (r.get("title_zh") or "").strip()][:limit]
-    print(f"Articles pending Chinese translation: {len(rows)}")
+    rows = result.data or []
+    if not force:
+        rows = [r for r in rows if not (r.get("title_zh") or "").strip()]
+    rows = rows[:limit]
+    print(f"Articles pending Chinese translation: {len(rows)} (force={force})")
     if not rows:
         return 0
 
     done = 0
-    batch_size = 8
+    batch_size = 5
     for i in range(0, len(rows), batch_size):
         batch = rows[i : i + batch_size]
         payload = {
@@ -121,8 +133,9 @@ def translate_articles(limit: int = 40) -> int:
         try:
             data = chat_json(
                 TRANSLATE_SYSTEM,
-                f"请翻译以下新闻（JSON）：\n{payload}",
-                temperature=0.1,
+                "请把下列新闻改写成高质量简体中文标题与摘要。只输出 JSON。\n"
+                + str(payload),
+                temperature=0.2,
             )
             items = data.get("items") or []
             by_id = {str(it.get("id")): it for it in items if isinstance(it, dict)}
@@ -149,13 +162,14 @@ def main() -> None:
         print("AI_API_KEY not set — skip AI processing", file=sys.stderr)
         sys.exit(0)
     force = "--force-keywords" in sys.argv
+    retranslate = "--retranslate" in sys.argv
     keywords_only = "--keywords-only" in sys.argv
-    translate_only = "--translate-only" in sys.argv
+    translate_only = "--translate-only" in sys.argv or retranslate
     k = a = 0
     if not translate_only:
         k = process_keywords(force=force)
     if not keywords_only:
-        a = translate_articles()
+        a = translate_articles(force=retranslate)
     print(f"Done. keywords_expanded={k} articles_translated={a}")
 
 
