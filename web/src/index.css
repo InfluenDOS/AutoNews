@@ -395,10 +395,60 @@ input:focus {
   color: var(--accent-2);
 }
 
-.card-hint {
-  margin: 0.4rem 0 0;
-  font-size: 0.8rem;
-  color: var(--accent-2);
+.card-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
+}
+
+.article-detail {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.detail-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.detail-meta {
+  margin-bottom: 0.75rem;
+}
+
+.detail-title {
+  margin: 0 0 1.25rem;
+  font-size: clamp(1.45rem, 3vw, 1.9rem);
+  line-height: 1.35;
+}
+
+.detail-body {
+  font-size: 1.05rem;
+  line-height: 1.75;
+  color: var(--text);
+}
+
+.detail-body p {
+  margin: 0 0 1rem;
+}
+
+.detail-footer {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 0.85rem;
+  justify-items: start;
+}
+
+.star-btn.wide {
+  width: auto;
+  min-width: auto;
+  padding: 0 0.85rem;
+  font-size: 0.9rem;
 }
 
 .empty {

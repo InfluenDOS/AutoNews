@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import type { Article } from '../types'
 
 function formatDate(value: string | null) {
@@ -23,6 +24,8 @@ type Props = {
 export function ArticleCard({ article, starred, matchedKeywords, onToggleStar, canStar }: Props) {
   const title = (article.title_zh || '').trim() || article.title
   const summary = (article.summary_zh || '').trim() || article.summary
+  const preview =
+    summary.length > 140 ? `${summary.slice(0, 140).trim()}…` : summary
   const translated = Boolean((article.title_zh || '').trim())
 
   return (
@@ -32,14 +35,10 @@ export function ArticleCard({ article, starred, matchedKeywords, onToggleStar, c
         <time dateTime={article.published_at ?? undefined}>{formatDate(article.published_at)}</time>
       </div>
       <h2 className="card-title">
-        <a href={article.url} target="_blank" rel="noopener noreferrer">
-          {title}
-        </a>
+        <Link to={`/article/${article.id}`}>{title}</Link>
       </h2>
-      {summary && <p className="card-summary">{summary}</p>}
-      {!translated && (
-        <p className="card-hint">原文展示中 · 等待 AI 翻译为中文</p>
-      )}
+      {preview && <p className="card-summary">{preview}</p>}
+      {!translated && <p className="card-hint">等待 AI 翻译为中文</p>}
       <div className="card-actions">
         {matchedKeywords && matchedKeywords.length > 0 && (
           <div className="tags">
@@ -50,17 +49,25 @@ export function ArticleCard({ article, starred, matchedKeywords, onToggleStar, c
             ))}
           </div>
         )}
-        {canStar && onToggleStar && (
-          <button
-            type="button"
-            className={`star-btn ${starred ? 'on' : ''}`}
-            onClick={onToggleStar}
-            aria-label={starred ? '取消收藏' : '加入收藏'}
-            title={starred ? '从收藏夹移除' : '加入收藏夹'}
-          >
-            {starred ? '★' : '☆'}
-          </button>
-        )}
+        <div className="card-actions-right">
+          <Link className="linkish" to={`/article/${article.id}`}>
+            阅读全文
+          </Link>
+          {canStar && onToggleStar && (
+            <button
+              type="button"
+              className={`star-btn ${starred ? 'on' : ''}`}
+              onClick={(e) => {
+                e.preventDefault()
+                onToggleStar()
+              }}
+              aria-label={starred ? '取消收藏' : '加入收藏'}
+              title={starred ? '从收藏夹移除' : '加入收藏夹'}
+            >
+              {starred ? '★' : '☆'}
+            </button>
+          )}
+        </div>
       </div>
     </article>
   )
