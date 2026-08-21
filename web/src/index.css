@@ -691,10 +691,22 @@ textarea {
 }
 
 .app-shell.sidebar-collapsed .side-children {
-  margin-left: 0;
-  padding-left: 0;
-  border-left: 0;
+  position: relative;
+  width: max-content;
+  margin: 0.12rem auto 0;
+  padding: 0.2rem 0 0.1rem 0.42rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.28);
   align-items: stretch;
+}
+
+.app-shell.sidebar-collapsed .side-kw-row {
+  justify-content: flex-start;
+}
+
+.app-shell.sidebar-collapsed .side-item-child {
+  justify-content: center;
+  min-width: 2rem;
+  padding: 0.5rem 0.3rem;
 }
 
 .app-shell.sidebar-collapsed .side-item,
