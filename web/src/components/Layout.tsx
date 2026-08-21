@@ -6,53 +6,64 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="app-shell">
-      <div className="bg-grid" aria-hidden="true" />
-      <div className="bg-glow" aria-hidden="true" />
-
-      <header className="topbar">
-        <Link to="/" className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            <span>AN</span>
-          </span>
-          <span className="brand-text">
+      <aside className="sidebar">
+        <Link to="/" className="side-brand">
+          <span className="side-logo">AN</span>
+          <span>
             <strong>AutoNews</strong>
-            <small>KEYWORD INTEL · SRBIJA</small>
+            <small>塞尔维亚关键词新闻</small>
           </span>
         </Link>
-        <nav className="nav">
+
+        <nav className="side-nav">
           <NavLink to="/" end>
-            新闻
+            新闻首页
           </NavLink>
           {user && (
             <>
-              <NavLink to="/keywords">关键词</NavLink>
+              <NavLink to="/keywords">我的关键词</NavLink>
               <NavLink to="/stars">收藏夹</NavLink>
             </>
           )}
           {!user ? (
-            <NavLink to="/auth" className="btn btn-sm">
-              登录
-            </NavLink>
+            <NavLink to="/auth">登录 / 注册</NavLink>
           ) : (
-            <button type="button" className="btn btn-sm btn-ghost" onClick={() => void signOut()}>
-              退出
+            <button type="button" className="side-logout" onClick={() => void signOut()}>
+              退出登录
             </button>
           )}
         </nav>
-      </header>
 
-      {!configured && (
-        <div className="banner warn">
-          请先配置 Supabase 环境变量并执行数据库迁移。
+        <div className="side-tip">
+          <strong>今日提示</strong>
+          <p>用中文写一句关注点，系统会自动匹配塞尔维亚相关报道并译成中文。</p>
         </div>
-      )}
+      </aside>
 
-      <main className="main">{children}</main>
+      <div className="content-shell">
+        <header className="top-welcome">
+          <div>
+            <p className="eyebrow">Welcome back</p>
+            <h1 className="welcome-title">{user ? '又见面啦' : '欢迎来到 AutoNews'}</h1>
+            <p className="welcome-sub">
+              {user ? '看看今天有没有你关心的新消息。' : '登录后即可订阅关键词、收藏新闻。'}
+            </p>
+          </div>
+          <div className="welcome-meta">
+            <span>{new Date().toLocaleDateString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+          </div>
+        </header>
 
-      <footer className="footer">
-        <div className="footer-line" />
-        <p>站内中文短讯 · 底部可打开原文 · RSS 定时更新 · 不转载全文</p>
-      </footer>
+        {!configured && (
+          <div className="banner warn">请先配置 Supabase，并完成数据库迁移。</div>
+        )}
+
+        <main className="main">{children}</main>
+
+        <footer className="footer">
+          站内中文短讯 · 底部可打开原文 · 定时更新 · 不转载全文
+        </footer>
+      </div>
     </div>
   )
 }

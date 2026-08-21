@@ -141,13 +141,13 @@ export function HomePage() {
     <section className="feed">
       <div className="feed-header">
         <div>
-          <h1>关键词新闻</h1>
+          <h1>今天的新闻</h1>
           <p className="muted">
             {user
               ? phrases.length > 0
-                ? '情报筛选中：只显示命中你关键词的报道。'
-                : '先部署关键词，系统才会开始采集。'
-              : '登录后配置关键词，开始追踪塞尔维亚相关情报。'}
+                ? '已按你的关键词筛选，点标题可阅读中文详情。'
+                : '先去添加关键词，我们才会开始帮你找新闻。'
+              : '登录后就能订阅关键词，并把喜欢的新闻收进收藏夹。'}
           </p>
         </div>
         <div className="feed-controls">
