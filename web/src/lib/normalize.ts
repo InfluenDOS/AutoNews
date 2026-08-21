@@ -272,17 +272,7 @@ function matchesToken(haystack: string, token: string): boolean {
 }
 
 const MATCH_STOPWORDS = new Set([
-  'srbija',
-  'serbia',
-  'srbiji',
-  'srbiju',
-  'srbijom',
-  'balkan',
-  'beograd',
-  'belgrade',
-  'evropa',
-  'europa',
-  'europe',
+  // Function words only — place names must stay in multi-word AND matching
   'vesti',
   'news',
   'world',
@@ -361,6 +351,25 @@ const BROAD_SINGLE_TERMS = new Set([
   'predsednica',
   'vlade',
   'vlada',
+  // Places — ok inside phrases, too broad alone
+  'srbija',
+  'serbia',
+  'srbiji',
+  'srbiju',
+  'srbijom',
+  'balkan',
+  'beograd',
+  'belgrade',
+  'evropa',
+  'europa',
+  'europe',
+  // Climate alone matches any "Season 3" trailer
+  'climate',
+  'weather',
+  'season',
+  'seasons',
+  'temperature',
+  'precipitation',
 ])
 
 /** Prefer AI phrases; also keep distinctive content cores for inflection matching. */

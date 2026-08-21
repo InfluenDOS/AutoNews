@@ -298,17 +298,8 @@ def matches_keyword_exact(haystack: str, keyword: str) -> bool:
 
 
 MATCH_STOPWORDS = {
-    "srbija",
-    "serbia",
-    "srbiji",
-    "srbiju",
-    "srbijom",
-    "balkan",
-    "beograd",
-    "belgrade",
-    "evropa",
-    "europa",
-    "europe",
+    # Function words only — do NOT put place names here.
+    # (Places as stopwords broke phrases like "Serbia seasons" → only "seasons".)
     "vesti",
     "news",
     "world",
@@ -389,6 +380,25 @@ BROAD_SINGLE_TERMS = {
     "predsednica",
     "vlade",
     "vlada",
+    # Places — fine inside phrases, too broad alone
+    "srbija",
+    "serbia",
+    "srbiji",
+    "srbiju",
+    "srbijom",
+    "balkan",
+    "beograd",
+    "belgrade",
+    "evropa",
+    "europa",
+    "europe",
+    # Climate/weather alone matches any "Season 3" trailer etc.
+    "climate",
+    "weather",
+    "season",
+    "seasons",
+    "temperature",
+    "precipitation",
 }
 
 
