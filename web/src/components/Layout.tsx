@@ -5,6 +5,7 @@ import { useJobs } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
 import { loadDailyPoem, type DailyPoem } from '../lib/dailyPoem'
 import { ProcessBanner } from './ProcessBanner'
+import { BrandLogo } from './BrandLogo'
 import {
   IconChevron,
   IconHash,
@@ -144,7 +145,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <aside className="sidebar" aria-label="主导航">
         <div className="sidebar-body">
           <Link to="/" className="side-brand" title="AutoNews">
-            <span className="brand-mark">AN</span>
+            <BrandLogo />
             <span className="brand-name">
               AutoNews
               <small>关键词订阅新闻</small>
