@@ -148,108 +148,80 @@ textarea {
   transition: padding 0.36s var(--side-ease);
 }
 
+.side-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
 .side-brand {
   display: inline-flex;
   align-items: center;
   gap: 0.75rem;
   padding: 0.35rem 0.25rem;
   min-width: 0;
+  flex: 1;
 }
 
-.side-toggle {
-  position: absolute;
-  top: 50%;
-  right: 0;
-  z-index: 4;
-  display: grid;
-  place-items: center;
-  width: 16px;
-  height: 64px;
-  padding: 0;
+.side-collapse-btn {
+  appearance: none;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
   margin: 0;
-  border: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
   background: transparent;
   color: var(--ink-soft);
   cursor: pointer;
-  transform: translate(100%, -50%);
+  display: grid;
+  place-items: center;
   transition:
-    width 0.36s var(--side-ease),
-    color 0.24s ease,
-    transform 0.36s var(--side-ease);
+    background 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease;
 }
 
-.side-toggle-rail {
-  position: absolute;
-  inset: 0;
-  border: 1px solid var(--line);
-  border-left-color: transparent;
-  border-radius: 0 12px 12px 0;
-  background: var(--side-bg);
-  backdrop-filter: blur(28px) saturate(1.35);
-  -webkit-backdrop-filter: blur(28px) saturate(1.35);
-  box-shadow: 4px 0 18px rgba(0, 0, 0, 0.18);
-  transition:
-    border-radius 0.36s var(--side-ease),
-    background 0.24s ease,
-    border-color 0.24s ease,
-    box-shadow 0.24s ease;
+.side-collapse-btn:hover {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: transparent;
 }
 
-.side-toggle::before,
-.side-toggle::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  width: 10px;
-  height: 10px;
-  pointer-events: none;
-  background: radial-gradient(circle at right, transparent 9px, var(--line) 10px, var(--line) 10.5px, transparent 11px);
-  opacity: 0.9;
-  transition: opacity 0.24s ease;
-}
-
-.side-toggle::before {
-  top: -9px;
-  transform: scaleY(-1);
-}
-
-.side-toggle::after {
-  bottom: -9px;
-}
-
-.side-toggle-icon {
-  position: relative;
-  z-index: 1;
-  font-size: 1.05rem;
+.side-collapse-chevron {
+  display: block;
+  font-size: 1.15rem;
   line-height: 1;
   font-weight: 700;
   transform: rotate(0deg);
-  transition: transform 0.36s var(--side-ease);
+  transition: transform 0.28s var(--side-ease);
 }
 
-.side-toggle:hover {
-  width: 20px;
-  color: var(--accent-ink);
-}
-
-.side-toggle:hover .side-toggle-rail {
-  background: var(--accent);
-  border-color: transparent;
-  box-shadow: 4px 0 20px rgba(200, 240, 130, 0.28);
-}
-
-.side-toggle:hover::before,
-.side-toggle:hover::after {
-  opacity: 0;
-}
-
-.app-shell.sidebar-collapsed .side-toggle-icon {
+.app-shell.sidebar-collapsed .side-collapse-chevron {
   transform: rotate(180deg);
 }
 
 .app-shell.sidebar-collapsed .sidebar-body {
   padding-left: 0.65rem;
   padding-right: 0.65rem;
+}
+
+.app-shell.sidebar-collapsed .side-brand-row {
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.app-shell.sidebar-collapsed .side-brand {
+  flex: 0 0 auto;
+  justify-content: center;
+  padding: 0.2rem;
+}
+
+.mobile-open-btn {
+  display: none;
 }
 
 .brand-mark {
@@ -670,10 +642,6 @@ textarea {
   align-items: stretch;
 }
 
-.app-shell.sidebar-collapsed .side-brand {
-  justify-content: center;
-  padding: 0.2rem;
-}
 
 .app-shell.sidebar-collapsed .side-fold {
   display: none;
@@ -1701,27 +1669,31 @@ a.auth-switch {
     display: flex;
   }
 
-  .mobile-menu-btn {
-    appearance: none;
-    flex-shrink: 0;
+  .mobile-open-btn {
+    display: grid;
     width: 2.55rem;
     height: 2.55rem;
     border-radius: 12px;
     border: 1px solid var(--line);
     background: rgba(255, 255, 255, 0.06);
     color: var(--ink);
-    font-size: 1.15rem;
-    font-weight: 700;
-    line-height: 1;
-    cursor: pointer;
-    display: grid;
-    place-items: center;
+    font-size: 1.05rem;
   }
 
-  .mobile-menu-btn:hover {
+  .mobile-open-btn:hover {
     background: var(--accent);
     border-color: transparent;
     color: var(--accent-ink);
+  }
+
+  .app-shell:not(.sidebar-collapsed) .side-brand-row {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .app-shell:not(.sidebar-collapsed) .side-collapse-btn {
+    width: 2.2rem;
+    height: 2.2rem;
   }
 
   .sidebar-scrim {
@@ -1810,51 +1782,6 @@ a.auth-switch {
   .side-nav a,
   .side-logout {
     width: 100%;
-  }
-
-  .side-toggle {
-    top: 50%;
-    right: 0;
-    bottom: auto;
-    width: 16px;
-    height: 64px;
-    transform: translate(100%, -50%);
-  }
-
-  .side-toggle-rail {
-    border: 1px solid var(--line);
-    border-left-color: transparent;
-    border-top-color: var(--line);
-    border-radius: 0 12px 12px 0;
-    box-shadow: 4px 0 18px rgba(0, 0, 0, 0.18);
-  }
-
-  .side-toggle::before,
-  .side-toggle::after {
-    display: block;
-  }
-
-  .side-toggle:hover {
-    width: 20px;
-    height: 64px;
-  }
-
-  .side-toggle-icon {
-    transform: none;
-    font-size: 1.05rem;
-    line-height: 1;
-  }
-
-  .side-toggle-icon::before {
-    content: none;
-  }
-
-  .app-shell.sidebar-collapsed .side-toggle {
-    display: none;
-  }
-
-  .app-shell.sidebar-collapsed .side-toggle-icon {
-    transform: none;
   }
 
   .side-poem {
