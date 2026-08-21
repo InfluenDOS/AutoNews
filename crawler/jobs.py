@@ -46,9 +46,30 @@ def ensure_jobs(
     title: str,
     detail: str = "",
 ) -> None:
+    """Insert jobs only for users who do not already have an active row for this step."""
     if not user_ids:
         return
-    rows = [
+    unique = sorted(set(user_ids))
+    active: set[str] = set()
+    try:
+        rows = (
+            sb.table("user_jobs")
+            .select("user_id")
+            .eq("step", step)
+            .in_("status", ["queued", "running"])
+            .in_("user_id", unique)
+            .execute()
+            .data
+            or []
+        )
+        active = {r["user_id"] for r in rows if r.get("user_id")}
+    except Exception as exc:  # noqa: BLE001
+        print(f"user_jobs active lookup skipped ({step}): {exc}")
+
+    missing = [uid for uid in unique if uid not in active]
+    if not missing:
+        return
+    payload = [
         {
             "user_id": uid,
             "step": step,
@@ -57,10 +78,10 @@ def ensure_jobs(
             "detail": detail,
             "updated_at": _now(),
         }
-        for uid in sorted(set(user_ids))
+        for uid in missing
     ]
     try:
-        sb.table("user_jobs").insert(rows).execute()
+        sb.table("user_jobs").insert(payload).execute()
     except Exception as exc:  # noqa: BLE001
         print(f"user_jobs insert skipped ({step}): {exc}")
 
