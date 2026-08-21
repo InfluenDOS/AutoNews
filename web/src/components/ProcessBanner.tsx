@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useJobs } from '../context/JobsContext'
+import { useKeywords } from '../context/KeywordsContext'
 import type { UserJob } from '../types/jobs'
 
 function stepLabel(step: UserJob['step']) {
@@ -17,6 +18,13 @@ function statusLabel(status: UserJob['status']) {
 
 export function ProcessBanner() {
   const { activeJobs, recentDone, hasActive } = useJobs()
+  const { keywords } = useKeywords()
+  const phraseById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const k of keywords) map.set(k.id, k.phrase)
+    return map
+  }, [keywords])
+
   const items = useMemo(() => [...activeJobs, ...recentDone], [activeJobs, recentDone])
 
   if (items.length === 0) return null
@@ -34,14 +42,22 @@ export function ProcessBanner() {
         )}
       </div>
       <ul className="process-banner-list">
-        {items.map((job) => (
-          <li key={job.id} className={`process-item is-${job.status}`}>
-            <span className="process-step">{stepLabel(job.step)}</span>
-            <span className="process-title">{job.title}</span>
-            <span className="process-status">{statusLabel(job.status)}</span>
-            {job.detail ? <span className="process-detail">{job.detail}</span> : null}
-          </li>
-        ))}
+        {items.map((job) => {
+          const linked = job.keyword_id ? phraseById.get(job.keyword_id) : null
+          const showKw =
+            linked && !job.title.includes(`「${linked}」`) ? linked : null
+          return (
+            <li key={job.id} className={`process-item is-${job.status}`}>
+              <span className="process-step">{stepLabel(job.step)}</span>
+              <span className="process-title">{job.title}</span>
+              <span className="process-status">{statusLabel(job.status)}</span>
+              {showKw ? (
+                <span className="process-keyword">关键词：{showKw}</span>
+              ) : null}
+              {job.detail ? <span className="process-detail">{job.detail}</span> : null}
+            </li>
+          )
+        })}
       </ul>
     </div>
   )

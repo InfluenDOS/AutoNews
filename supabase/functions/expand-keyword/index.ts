@@ -188,18 +188,20 @@ async function maybeTriggerCrawl(
   admin: ReturnType<typeof createClient>,
   userId: string,
   keywordId: string,
+  phrase: string,
 ): Promise<{ triggered: boolean; reason?: string }> {
   const token = Deno.env.get('GITHUB_TOKEN')?.trim()
   const repo = (Deno.env.get('GITHUB_REPO') || 'InfluenDOS/AutoNews').trim()
   const workflow = (Deno.env.get('GITHUB_WORKFLOW') || 'crawl.yml').trim()
+  const label = phrase.trim() ? `「${phrase.trim()}」` : '关键词'
 
   const crawlJobId = await createJob(admin, {
     user_id: userId,
     keyword_id: keywordId,
     step: 'crawl',
     status: 'queued',
-    title: '抓取并匹配新闻',
-    detail: '等待触发 GitHub Actions…',
+    title: `抓取${label}`,
+    detail: `等待触发抓取，处理关键词 ${label}`,
   })
 
   if (!token) {
@@ -221,13 +223,8 @@ async function maybeTriggerCrawl(
     const elapsed = Date.now() - new Date(cool.last_triggered_at).getTime()
     if (elapsed < cooldownSec * 1000) {
       await updateJob(admin, crawlJobId, {
-        status: 'running',
-        detail: '已有抓取在冷却/进行中，本次扩展会并入那一轮',
-      })
-      // Clear shortly so banner does not stick forever
-      await updateJob(admin, crawlJobId, {
         status: 'done',
-        detail: '并入近期抓取任务',
+        detail: `${label} 已并入近期抓取任务`,
       })
       return { triggered: false, reason: 'cooldown' }
     }
@@ -262,7 +259,7 @@ async function maybeTriggerCrawl(
 
   await updateJob(admin, crawlJobId, {
     status: 'running',
-    detail: 'Actions 已触发，正在抓取 RSS 与匹配…',
+    detail: `正在抓取并匹配 ${label} …`,
   })
 
   return { triggered: true }
@@ -386,7 +383,7 @@ Deno.serve(async (req) => {
 
         await updateJob(admin, expandJobId, {
           status: 'done',
-          detail: `完成 · ${expandedPayload.match_mode} · ${expandedPayload.search_terms.length} 个词`,
+          detail: `「${phrase}」扩展完成 · ${expandedPayload.match_mode} · ${expandedPayload.search_terms.length} 个检索词`,
         })
       }
     } catch (expandErr) {
@@ -397,7 +394,7 @@ Deno.serve(async (req) => {
 
     let crawl: { triggered: boolean; reason?: string } = { triggered: false, reason: 'not_requested' }
     if (wantCrawl) {
-      const crawlTask = maybeTriggerCrawl(admin, user.id, keywordId)
+      const crawlTask = maybeTriggerCrawl(admin, user.id, keywordId, phrase)
       const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } })
         .EdgeRuntime
       if (runtime?.waitUntil) {

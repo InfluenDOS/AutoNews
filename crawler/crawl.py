@@ -14,7 +14,7 @@ from supabase import Client, create_client
 
 from normalize import normalize_for_match
 from relevance import filter_matches_with_relevance, stage1_match
-from jobs import ensure_jobs, ensure_translate_jobs, mark_jobs
+from jobs import ensure_crawl_jobs, ensure_translate_jobs, mark_jobs
 from sources import FEED_SOURCES
 
 
@@ -201,14 +201,7 @@ def crawl() -> None:
     sb = get_supabase()
     user_keywords = load_user_keywords(sb)
     print(f"Users with keywords: {len(user_keywords)}")
-    ensure_jobs(
-        sb,
-        user_ids=list(user_keywords.keys()),
-        step="crawl",
-        status="running",
-        title="抓取并匹配新闻",
-        detail="正在抓取 RSS 并匹配关键词…",
-    )
+    ensure_crawl_jobs(sb, user_keywords)
     mark_jobs(
         sb,
         step="crawl",
@@ -303,9 +296,24 @@ def crawl() -> None:
         detail=f"完成 · 匹配 {len(candidates)} 篇 · hits {inserted}",
         from_statuses=["queued", "running"],
     )
+    # Per-user phrases that actually produced hits
+    phrases_by_user: dict[str, list[str]] = {}
+    for m in stage1_matches:
+        uid = m.get("user_id")
+        phrase = (m.get("keyword_phrase") or "").strip()
+        if not uid:
+            continue
+        bucket = phrases_by_user.setdefault(uid, [])
+        if phrase and phrase not in bucket:
+            bucket.append(phrase)
     hit_users = list({h["user_id"] for h in hits})
     if hit_users:
-        ensure_translate_jobs(sb, hit_users, detail="等待翻译匹配新闻…")
+        ensure_translate_jobs(
+            sb,
+            hit_users,
+            detail="等待翻译匹配新闻…",
+            phrases_by_user=phrases_by_user,
+        )
     print(
         f"Scanned {scanned} · matched articles {len(candidates)} · preview kept {len(preview_only)} · "
         f"upserted {count} · hits {inserted} (replaced {deleted_hits}) · removed orphans {removed}"

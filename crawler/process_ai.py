@@ -8,7 +8,7 @@ from typing import Any
 
 from ai_client import ai_configured, chat_json
 from crawl import get_supabase
-from jobs import mark_jobs
+from jobs import job_title, mark_jobs, phrase_label
 from normalize import (
     clean_match_groups,
     expand_match_terms,
@@ -115,12 +115,13 @@ def process_keywords(limit: int = 30, force: bool = False) -> int:
     pending = [r for r in rows if _keyword_needs_expand(r, force)][:limit]
     print(f"Keywords pending AI expansion: {len(pending)}")
     if pending:
+        phrases = [str(r.get("phrase") or "") for r in pending]
         mark_jobs(
             sb,
             step="expand",
             status="running",
-            title="批量扩展关键词",
-            detail=f"待处理 {len(pending)} 个",
+            title=job_title("扩展", phrases),
+            detail=f"正在扩展 {phrase_label(phrases)} …",
             from_statuses=["queued", "running"],
         )
     done = 0
