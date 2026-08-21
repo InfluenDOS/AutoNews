@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 
 function translateAuthError(message: string): string {
   const m = message.toLowerCase()
@@ -17,6 +18,7 @@ function translateAuthError(message: string): string {
 
 export function AuthPage() {
   const { user, signIn, signUp, loading } = useAuth()
+  const { showToast } = useToast()
   const navigate = useNavigate()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
@@ -37,13 +39,21 @@ export function AuthPage() {
     try {
       if (mode === 'signin') {
         const { error: err } = await signIn(email.trim(), password)
-        if (err) setError(translateAuthError(err))
-        else navigate('/')
+        if (err) {
+          setError(translateAuthError(err))
+          showToast('登录失败', 'error')
+        } else {
+          showToast('登录成功', 'ok')
+          navigate('/')
+        }
       } else {
         const { error: err } = await signUp(email.trim(), password)
-        if (err) setError(translateAuthError(err))
-        else {
+        if (err) {
+          setError(translateAuthError(err))
+          showToast('注册失败', 'error')
+        } else {
           setMessage('注册成功。若开启了邮箱确认，请先查收邮件再登录。')
+          showToast('注册成功', 'ok')
           setMode('signin')
         }
       }
