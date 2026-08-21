@@ -159,11 +159,120 @@ def _is_word_char(ch: str) -> bool:
     return ch.isalnum()
 
 
-def matches_keyword(haystack: str, keyword: str) -> bool:
-    """True if keyword appears as a whole token/phrase (not a substring of a longer word).
+# Common Serbian inflectional / adjectival endings (longest first).
+_SR_SUFFIXES = (
+    "ijima",
+    "ijama",
+    "ovima",
+    "evima",
+    "ijem",
+    "ijom",
+    "ima",
+    "ama",
+    "oga",
+    "ome",
+    "omu",
+    "ski",
+    "ska",
+    "sko",
+    "cki",
+    "cka",
+    "cko",
+    "ški",
+    "ška",
+    "ško",
+    "ovi",
+    "evi",
+    "ama",
+    "ima",
+    "om",
+    "em",
+    "im",
+    "og",
+    "oj",
+    "ih",
+    "na",
+    "ni",
+    "ne",
+    "no",
+    "a",
+    "e",
+    "i",
+    "u",
+    "o",
+)
 
-    Prevents false friends like premijer (PM) matching inside premijera (premiere).
-    """
+# Query token → haystack full-forms that must NOT count as a hit (false friends).
+_FALSE_FRIEND_HITS = {
+    "premijer": frozenset({"premijera"}),
+    "premijerka": frozenset({"premijera"}),
+}
+
+
+def light_stem(word: str) -> str:
+    """Cheap Serbian-ish stem for matching inflected newspaper forms."""
+    w = normalize_for_match(word)
+    if len(w) < 5:
+        return w
+    for suf in _SR_SUFFIXES:
+        if w.endswith(suf) and len(w) - len(suf) >= 4:
+            return w[: -len(suf)]
+    return w
+
+
+def _haystack_words(haystack: str) -> list[str]:
+    h = normalize_for_match(haystack)
+    out: list[str] = []
+    buf: list[str] = []
+    for ch in h:
+        if _is_word_char(ch):
+            buf.append(ch)
+        elif buf:
+            out.append("".join(buf))
+            buf = []
+    if buf:
+        out.append("".join(buf))
+    return out
+
+
+def _is_false_friend(query_token: str, hay_word: str) -> bool:
+    q = normalize_for_match(query_token)
+    w = normalize_for_match(hay_word)
+    blocked = _FALSE_FRIEND_HITS.get(q) or _FALSE_FRIEND_HITS.get(light_stem(q))
+    if not blocked:
+        return False
+    return w in blocked or any(w.startswith(b) and w != q for b in blocked)
+
+
+def matches_token(haystack: str, token: str) -> bool:
+    """Match one token allowing common Serbian inflections, with false-friend guards."""
+    t = normalize_for_match(token)
+    if not t:
+        return False
+    # Exact whole-token match first
+    if matches_keyword_exact(haystack, t):
+        return True
+    stem = light_stem(t)
+    if len(stem) < 4:
+        return False
+    for word in _haystack_words(haystack):
+        if _is_false_friend(t, word):
+            continue
+        if word == t:
+            return True
+        w_stem = light_stem(word)
+        if w_stem == stem:
+            return True
+        # izbor* family: izbori / izbore / izborima / izborna
+        if len(stem) >= 4 and (word.startswith(stem) or stem.startswith(w_stem) and len(w_stem) >= 4):
+            if _is_false_friend(t, word):
+                continue
+            return True
+    return False
+
+
+def matches_keyword_exact(haystack: str, keyword: str) -> bool:
+    """Contiguous phrase match with word boundaries (no stemming)."""
     h = normalize_for_match(haystack)
     k = normalize_for_match(keyword)
     if not k:
@@ -184,6 +293,9 @@ def matches_keyword(haystack: str, keyword: str) -> bool:
 MATCH_STOPWORDS = {
     "srbija",
     "serbia",
+    "srbiji",
+    "srbiju",
+    "srbijom",
     "balkan",
     "beograd",
     "belgrade",
@@ -194,7 +306,49 @@ MATCH_STOPWORDS = {
     "news",
     "world",
     "svet",
+    "u",
+    "i",
+    "na",
+    "od",
+    "za",
+    "sa",
+    "se",
+    "je",
+    "su",
+    "a",
+    "the",
+    "of",
+    "and",
 }
+
+
+def content_tokens(term: str) -> list[str]:
+    """Non-stopword tokens from a search phrase."""
+    parts = normalize_for_match(term).split()
+    return [p for p in parts if p and p not in MATCH_STOPWORDS]
+
+
+def matches_keyword(haystack: str, keyword: str) -> bool:
+    """True if keyword matches haystack, with inflection + multi-word AND fallback.
+
+    - Contiguous phrase with word boundaries (preferred)
+    - Else all content tokens match via light stemming (handles izbori→izbore)
+    - Guards false friends like premijer vs premijera
+    """
+    k = normalize_for_match(keyword)
+    if not k:
+        return False
+    if matches_keyword_exact(haystack, k):
+        return True
+    toks = content_tokens(k)
+    if not toks:
+        return False
+    # Year-only leftovers are useless
+    toks = [t for t in toks if not t.isdigit()]
+    if not toks:
+        return False
+    return all(matches_token(haystack, t) for t in toks)
+
 
 # Too broad alone — cause false positives (any migrant story, any China mention, etc.)
 BROAD_SINGLE_TERMS = {
@@ -232,7 +386,7 @@ BROAD_SINGLE_TERMS = {
 
 
 def expand_match_terms(phrase: str, search_terms: list[str] | None = None) -> list[str]:
-    """Build precise match terms. Prefer multi-word phrases; skip broad singles."""
+    """Build match terms. Keep AI phrases; also emit distinctive content cores."""
     raw = [t.strip() for t in (search_terms or []) if str(t).strip()]
     base = raw if raw else ([phrase.strip()] if phrase and phrase.strip() else [])
     out: list[str] = []
@@ -242,6 +396,8 @@ def expand_match_terms(phrase: str, search_terms: list[str] | None = None) -> li
         key = normalize_for_match(term)
         if not key or key in seen or key in MATCH_STOPWORDS:
             return
+        if key.isdigit():
+            return
         # Reject broad single tokens
         if " " not in term.strip() and key in BROAD_SINGLE_TERMS:
             return
@@ -250,11 +406,21 @@ def expand_match_terms(phrase: str, search_terms: list[str] | None = None) -> li
 
     for term in base:
         add(term)
+        # If a phrase collapses to one distinctive content token (e.g. "izbori u Srbiji" → izbori),
+        # keep that core so inflected headlines match without dragging in noisy words like "proces".
+        cores = [t for t in content_tokens(term) if not t.isdigit()]
+        if len(cores) == 1 and len(cores[0]) >= 5 and cores[0] not in BROAD_SINGLE_TERMS:
+            add(cores[0])
 
     # If AI only gave broad singles, keep the most specific multi-word-looking combos
     # by pairing china-ish + migrant-ish when possible.
     if not out and raw:
-        china = [t for t in raw if normalize_for_match(t) in {"kina", "kineski", "chinese", "china"} or "kines" in normalize_for_match(t)]
+        china = [
+            t
+            for t in raw
+            if normalize_for_match(t) in {"kina", "kineski", "chinese", "china"}
+            or "kines" in normalize_for_match(t)
+        ]
         migr = [t for t in raw if any(x in normalize_for_match(t) for x in ("migr", "imigr", "ilegal"))]
         for c in china[:2]:
             for m in migr[:2]:
@@ -268,7 +434,7 @@ def expand_match_terms(phrase: str, search_terms: list[str] | None = None) -> li
 
 
 def article_matches_groups(haystack: str, terms: list[str]) -> bool:
-    """OR across precise terms (word-boundary aware)."""
+    """OR across precise terms (inflection-aware)."""
     if not terms:
         return False
     return any(matches_keyword(haystack, term) for term in terms)

@@ -154,8 +154,84 @@ function isWordChar(ch: string): boolean {
   return /\p{L}|\p{N}/u.test(ch)
 }
 
-/** Whole-token/phrase match — avoids premijer (PM) hitting premijera (premiere). */
-export function matchesKeyword(haystack: string, keyword: string): boolean {
+const SR_SUFFIXES = [
+  'ijima',
+  'ijama',
+  'ovima',
+  'evima',
+  'ijem',
+  'ijom',
+  'ima',
+  'ama',
+  'oga',
+  'ome',
+  'omu',
+  'ski',
+  'ska',
+  'sko',
+  'cki',
+  'cka',
+  'cko',
+  'ški',
+  'ška',
+  'ško',
+  'ovi',
+  'evi',
+  'om',
+  'em',
+  'im',
+  'og',
+  'oj',
+  'ih',
+  'na',
+  'ni',
+  'ne',
+  'no',
+  'a',
+  'e',
+  'i',
+  'u',
+  'o',
+] as const
+
+const FALSE_FRIEND_HITS: Record<string, ReadonlySet<string>> = {
+  premijer: new Set(['premijera']),
+  premijerka: new Set(['premijera']),
+}
+
+function lightStem(word: string): string {
+  const w = normalizeForMatch(word)
+  if (w.length < 5) return w
+  for (const suf of SR_SUFFIXES) {
+    if (w.endsWith(suf) && w.length - suf.length >= 4) return w.slice(0, -suf.length)
+  }
+  return w
+}
+
+function haystackWords(haystack: string): string[] {
+  const h = normalizeForMatch(haystack)
+  const out: string[] = []
+  let buf = ''
+  for (const ch of h) {
+    if (isWordChar(ch)) buf += ch
+    else if (buf) {
+      out.push(buf)
+      buf = ''
+    }
+  }
+  if (buf) out.push(buf)
+  return out
+}
+
+function isFalseFriend(queryToken: string, hayWord: string): boolean {
+  const q = normalizeForMatch(queryToken)
+  const w = normalizeForMatch(hayWord)
+  const blocked = FALSE_FRIEND_HITS[q] || FALSE_FRIEND_HITS[lightStem(q)]
+  if (!blocked) return false
+  return blocked.has(w) || [...blocked].some((b) => w.startsWith(b) && w !== q)
+}
+
+function matchesKeywordExact(haystack: string, keyword: string): boolean {
   const h = normalizeForMatch(haystack)
   const k = normalizeForMatch(keyword)
   if (!k) return false
@@ -171,6 +247,72 @@ export function matchesKeyword(haystack: string, keyword: string): boolean {
   }
 }
 
+function matchesToken(haystack: string, token: string): boolean {
+  const t = normalizeForMatch(token)
+  if (!t) return false
+  if (matchesKeywordExact(haystack, t)) return true
+  const stem = lightStem(t)
+  if (stem.length < 4) return false
+  for (const word of haystackWords(haystack)) {
+    if (isFalseFriend(t, word)) continue
+    if (word === t) return true
+    const wStem = lightStem(word)
+    if (wStem === stem) return true
+    if (stem.length >= 4 && (word.startsWith(stem) || (stem.startsWith(wStem) && wStem.length >= 4))) {
+      if (isFalseFriend(t, word)) continue
+      return true
+    }
+  }
+  return false
+}
+
+const MATCH_STOPWORDS = new Set([
+  'srbija',
+  'serbia',
+  'srbiji',
+  'srbiju',
+  'srbijom',
+  'balkan',
+  'beograd',
+  'belgrade',
+  'evropa',
+  'europa',
+  'europe',
+  'vesti',
+  'news',
+  'world',
+  'svet',
+  'u',
+  'i',
+  'na',
+  'od',
+  'za',
+  'sa',
+  'se',
+  'je',
+  'su',
+  'a',
+  'the',
+  'of',
+  'and',
+])
+
+function contentTokens(term: string): string[] {
+  return normalizeForMatch(term)
+    .split(/\s+/)
+    .filter((p) => p && !MATCH_STOPWORDS.has(p))
+}
+
+/** Inflection-aware match; multi-word uses content-token AND after dropping stopwords. */
+export function matchesKeyword(haystack: string, keyword: string): boolean {
+  const k = normalizeForMatch(keyword)
+  if (!k) return false
+  if (matchesKeywordExact(haystack, k)) return true
+  let toks = contentTokens(k).filter((t) => !/^\d+$/.test(t))
+  if (toks.length === 0) return false
+  return toks.every((t) => matchesToken(haystack, t))
+}
+
 export function articleMatchesKeywords(
   article: { title: string; summary: string; raw_text_normalized?: string },
   phrases: string[],
@@ -182,10 +324,6 @@ export function articleMatchesKeywords(
     (phrase) => matchesKeyword(combined, phrase) || matchesKeyword(normalized, phrase),
   )
 }
-
-const MATCH_STOPWORDS = new Set(
-  ['srbija', 'serbia', 'balkan', 'beograd', 'belgrade', 'evropa', 'europa', 'europe', 'vesti', 'news', 'world', 'svet'],
-)
 
 const BROAD_SINGLE_TERMS = new Set([
   'kina',
@@ -220,7 +358,7 @@ const BROAD_SINGLE_TERMS = new Set([
   'vlada',
 ])
 
-/** Prefer precise multi-word AI terms; never split into broad single tokens. */
+/** Prefer AI phrases; also keep distinctive content cores for inflection matching. */
 export function keywordMatchTerms(keyword: {
   phrase: string
   search_terms?: string[] | null
@@ -230,12 +368,20 @@ export function keywordMatchTerms(keyword: {
   const out: string[] = []
   const seen = new Set<string>()
 
-  for (const term of base) {
+  const add = (term: string) => {
     const key = normalizeForMatch(term)
-    if (!key || seen.has(key) || MATCH_STOPWORDS.has(key)) continue
-    if (!term.includes(' ') && BROAD_SINGLE_TERMS.has(key)) continue
+    if (!key || seen.has(key) || MATCH_STOPWORDS.has(key) || /^\d+$/.test(key)) return
+    if (!term.includes(' ') && BROAD_SINGLE_TERMS.has(key)) return
     seen.add(key)
     out.push(term)
+  }
+
+  for (const term of base) {
+    add(term)
+    const cores = contentTokens(term).filter((t) => !/^\d+$/.test(t))
+    if (cores.length === 1 && cores[0]!.length >= 5 && !BROAD_SINGLE_TERMS.has(cores[0]!)) {
+      add(cores[0]!)
+    }
   }
 
   if (out.length === 0 && keyword.phrase.trim()) {
