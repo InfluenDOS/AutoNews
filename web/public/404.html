@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>AutoNews</title>
+    <script>
+      // SPA fallback for GitHub Pages when not using HashRouter paths.
+      // With HashRouter this rarely triggers; kept for deep-link robustness.
+      sessionStorage.setItem('autonews-redirect', location.href)
+      location.replace('./index.html')
+    </script>
+  </head>
+  <body></body>
+</html>
