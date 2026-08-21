@@ -148,54 +148,102 @@ textarea {
   transition: padding 0.36s var(--side-ease);
 }
 
-.side-brand-row {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-width: 0;
-}
-
 .side-brand {
   display: inline-flex;
   align-items: center;
   gap: 0.75rem;
   padding: 0.35rem 0.25rem;
   min-width: 0;
-  flex: 1;
 }
 
-.side-collapse-btn {
-  appearance: none;
-  flex-shrink: 0;
-  width: 1.35rem;
-  height: 2rem;
-  margin: 0;
+.side-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 64px;
   padding: 0;
+  margin: 0;
   border: 0;
-  border-radius: 8px;
   background: transparent;
   color: var(--ink-soft);
   cursor: pointer;
-  display: grid;
-  place-items: center;
-  transition: color 0.2s ease, background 0.2s ease;
+  transform: translate(100%, -50%);
+  transition:
+    width 0.36s var(--side-ease),
+    color 0.24s ease,
+    transform 0.36s var(--side-ease);
 }
 
-.side-collapse-btn:hover {
-  color: var(--accent);
-  background: rgba(255, 255, 255, 0.06);
+.side-toggle-rail {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--line);
+  border-left-color: transparent;
+  border-radius: 0 12px 12px 0;
+  background: var(--side-bg);
+  backdrop-filter: blur(28px) saturate(1.35);
+  -webkit-backdrop-filter: blur(28px) saturate(1.35);
+  box-shadow: 4px 0 18px rgba(0, 0, 0, 0.18);
+  transition:
+    border-radius 0.36s var(--side-ease),
+    background 0.24s ease,
+    border-color 0.24s ease,
+    box-shadow 0.24s ease;
 }
 
-.side-collapse-chevron {
-  display: block;
-  font-size: 1.15rem;
+.side-toggle::before,
+.side-toggle::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  pointer-events: none;
+  background: radial-gradient(circle at right, transparent 9px, var(--line) 10px, var(--line) 10.5px, transparent 11px);
+  opacity: 0.9;
+  transition: opacity 0.24s ease;
+}
+
+.side-toggle::before {
+  top: -9px;
+  transform: scaleY(-1);
+}
+
+.side-toggle::after {
+  bottom: -9px;
+}
+
+.side-toggle-icon {
+  position: relative;
+  z-index: 1;
+  font-size: 1.05rem;
   line-height: 1;
   font-weight: 700;
   transform: rotate(0deg);
-  transition: transform 0.28s var(--side-ease);
+  transition: transform 0.36s var(--side-ease);
 }
 
-.app-shell.sidebar-collapsed .side-collapse-chevron {
+.side-toggle:hover {
+  width: 20px;
+  color: var(--accent-ink);
+}
+
+.side-toggle:hover .side-toggle-rail {
+  background: var(--accent);
+  border-color: transparent;
+  box-shadow: 4px 0 20px rgba(200, 240, 130, 0.28);
+}
+
+.side-toggle:hover::before,
+.side-toggle:hover::after {
+  opacity: 0;
+}
+
+.app-shell.sidebar-collapsed .side-toggle-icon {
   transform: rotate(180deg);
 }
 
@@ -204,20 +252,9 @@ textarea {
   padding-right: 0.65rem;
 }
 
-.app-shell.sidebar-collapsed .side-brand-row {
-  flex-direction: column;
-  align-items: center;
-  gap: 0.35rem;
-}
-
 .app-shell.sidebar-collapsed .side-brand {
-  flex: 0 0 auto;
   justify-content: center;
   padding: 0.2rem;
-}
-
-.mobile-open-btn {
-  display: none;
 }
 
 .brand-mark {
@@ -1631,7 +1668,7 @@ a.auth-switch {
 }
 
 
-.mobile-topbar,
+
 .sidebar-scrim {
   display: none;
 }
@@ -1640,50 +1677,6 @@ a.auth-switch {
   .app-shell,
   .app-shell.sidebar-collapsed {
     grid-template-columns: 1fr;
-  }
-
-  .mobile-topbar {
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    display: flex;
-    align-items: center;
-    gap: 0.65rem;
-    padding: 0.7rem 0.85rem;
-    border-bottom: 1px solid var(--line);
-    background: rgba(10, 18, 14, 0.82);
-    backdrop-filter: blur(28px) saturate(1.35);
-    -webkit-backdrop-filter: blur(28px) saturate(1.35);
-  }
-
-  .mobile-topbar-brand {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .mobile-topbar .brand-name {
-    display: flex;
-  }
-
-  .mobile-open-btn {
-    display: grid;
-    width: 2.2rem;
-    height: 2.2rem;
-    border-radius: 10px;
-    border: 0;
-    background: transparent;
-    color: var(--ink);
-    font-size: 1.15rem;
-  }
-
-  .mobile-open-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--accent);
-  }
-
-  .app-shell:not(.sidebar-collapsed) .side-brand-row {
-    flex-direction: row;
-    align-items: center;
   }
 
   .sidebar-scrim {
@@ -1706,7 +1699,7 @@ a.auth-switch {
     pointer-events: auto;
   }
 
-  /* Left drawer — same sidebar as desktop, overlaid from the left. */
+  /* Same left sidebar + edge toggle as desktop. */
   .sidebar {
     position: fixed;
     top: 0;
@@ -1720,32 +1713,94 @@ a.auth-switch {
     border-right: 1px solid var(--line);
     border-bottom: 0;
     overflow: visible;
-    /* Disable rise animation: its fill-mode transform fights the drawer slide. */
     animation: none;
     transform: translate3d(0, 0, 0);
-    transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    transition:
+      width 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+      background 0.24s ease,
+      border-color 0.24s ease,
+      box-shadow 0.24s ease;
     box-shadow: 12px 0 40px rgba(0, 0, 0, 0.35);
     background: rgba(8, 14, 11, 0.94);
-  }
-
-  .app-shell.sidebar-collapsed .sidebar {
-    transform: translate3d(-105%, 0, 0);
-    box-shadow: none;
-    pointer-events: none;
   }
 
   .sidebar-body {
     padding: 1.2rem 1rem 1.4rem;
     overflow-x: hidden;
     overflow-y: auto;
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.2s ease;
+  }
+
+  /* Collapsed: hide the rail; keep only the left-edge toggle tab. */
+  .app-shell.sidebar-collapsed .sidebar {
+    width: 0;
+    border-right-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    pointer-events: none;
   }
 
   .app-shell.sidebar-collapsed .sidebar-body {
-    padding-left: 1rem;
-    padding-right: 1rem;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    padding: 0;
   }
 
-  /* Full labels inside the open mobile drawer (not icon-rail mode). */
+  .app-shell,
+  .app-shell.sidebar-collapsed {
+    overflow-x: visible;
+  }
+
+  .app-shell.sidebar-collapsed .side-toggle {
+    position: fixed;
+    left: 0;
+    right: auto;
+    top: 50%;
+    z-index: 8;
+    pointer-events: auto;
+    transform: translate(0, -50%);
+  }
+
+  .side-toggle {
+    top: 50%;
+    right: 0;
+    bottom: auto;
+    width: 16px;
+    height: 64px;
+    transform: translate(100%, -50%);
+  }
+
+  .side-toggle-rail {
+    border: 1px solid var(--line);
+    border-left-color: transparent;
+    border-radius: 0 12px 12px 0;
+    box-shadow: 4px 0 18px rgba(0, 0, 0, 0.18);
+  }
+
+  .side-toggle::before,
+  .side-toggle::after {
+    display: block;
+  }
+
+  .side-toggle:hover {
+    width: 20px;
+    height: 64px;
+  }
+
+  .side-toggle-icon {
+    transform: none;
+  }
+
+  .app-shell.sidebar-collapsed .side-toggle-icon {
+    transform: rotate(180deg);
+  }
+
+  /* Full labels when the mobile sidebar is open. */
   .app-shell:not(.sidebar-collapsed) .brand-name {
     display: flex;
   }
@@ -1776,6 +1831,10 @@ a.auth-switch {
 
   .side-poem {
     display: none;
+  }
+
+  .content-shell {
+    padding-left: 1rem;
   }
 
   .hero {
