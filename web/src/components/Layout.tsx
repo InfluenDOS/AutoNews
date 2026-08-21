@@ -3,7 +3,6 @@ import { Link, NavLink } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useKeywordWorkspace } from '../context/KeywordWorkspace'
 import { useToast } from '../context/ToastContext'
-import { PoetryOrnament } from './PoetryOrnament'
 import { Spinner } from './Spinner'
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -152,8 +151,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 </button>
               )}
             </div>
-
-            {!collapsed && <PoetryOrnament variant="sidebar" seed={7} />}
           </div>
         ) : (
           !collapsed && (
@@ -162,7 +159,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <NavLink className="btn btn-sm" to="/auth">
                 登录 / 注册
               </NavLink>
-              <PoetryOrnament variant="sidebar" seed={3} />
             </div>
           )
         )}
@@ -184,13 +180,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="content-shell">
-        <div className="content-atmosphere" aria-hidden="true" />
+        <div className="content-atmosphere" aria-hidden="true">
+          <div
+            className="content-atmosphere-blur"
+            style={{ backgroundImage: 'url(./images/mountain-mist.jpg)' }}
+          />
+          <div className="content-atmosphere-veil" />
+        </div>
         {!configured && (
           <div className="banner warn">服务尚未完成配置，请联系管理员完成初始化。</div>
         )}
         <main className="main fade-rise">{children}</main>
         <footer className="footer">
-          <PoetryOrnament variant="inline" seed={11} />
           <p>精选摘要 · 注明出处 · 定时更新 · 不转载全文</p>
         </footer>
       </div>
