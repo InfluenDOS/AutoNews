@@ -713,6 +713,115 @@ textarea {
   background: transparent;
 }
 
+.process-banner {
+  width: min(980px, 100%);
+  margin: 0 auto 0.75rem;
+  border: 1px solid var(--line);
+  background: var(--glass-strong);
+  backdrop-filter: blur(16px);
+  border-radius: 18px;
+  padding: 14px 16px;
+  animation: process-in 0.35s ease both;
+}
+
+.process-banner.is-active {
+  border-color: rgba(200, 240, 130, 0.35);
+}
+
+.process-banner-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 0.92rem;
+}
+
+.process-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 rgba(200, 240, 130, 0.7);
+  animation: process-pulse 1.4s ease-out infinite;
+}
+
+.process-banner-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.process-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    'step title status'
+    'detail detail detail';
+  gap: 4px 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.88rem;
+}
+
+.process-step {
+  grid-area: step;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.process-title {
+  grid-area: title;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.process-status {
+  grid-area: status;
+  color: var(--ink-soft);
+}
+
+.process-detail {
+  grid-area: detail;
+  color: var(--ink-dim);
+  font-size: 0.82rem;
+}
+
+.process-item.is-done .process-status {
+  color: var(--ok);
+}
+
+.process-item.is-error .process-status {
+  color: var(--danger);
+}
+
+@keyframes process-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes process-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(200, 240, 130, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(200, 240, 130, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(200, 240, 130, 0);
+  }
+}
+
 .main-stage {
   width: min(980px, 100%);
   margin: 0 auto;
