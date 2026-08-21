@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { useToast } from '../context/ToastContext'
 
 function translateAuthError(message: string): string {
   const m = message.toLowerCase()
@@ -18,7 +17,6 @@ function translateAuthError(message: string): string {
 
 export function AuthPage() {
   const { user, signIn, signUp, loading } = useAuth()
-  const { showToast } = useToast()
   const navigate = useNavigate()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
@@ -26,9 +24,17 @@ export function AuthPage() {
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [enterKey, setEnterKey] = useState(0)
 
   if (!loading && user) {
     return <Navigate to="/" replace />
+  }
+
+  function switchMode() {
+    setMode((m) => (m === 'signin' ? 'signup' : 'signin'))
+    setError(null)
+    setMessage(null)
+    setEnterKey((k) => k + 1)
   }
 
   async function onSubmit(e: FormEvent) {
@@ -39,22 +45,15 @@ export function AuthPage() {
     try {
       if (mode === 'signin') {
         const { error: err } = await signIn(email.trim(), password)
-        if (err) {
-          setError(translateAuthError(err))
-          showToast('登录失败', 'error')
-        } else {
-          showToast('登录成功', 'ok')
-          navigate('/')
-        }
+        if (err) setError(translateAuthError(err))
+        else navigate('/')
       } else {
         const { error: err } = await signUp(email.trim(), password)
-        if (err) {
-          setError(translateAuthError(err))
-          showToast('注册失败', 'error')
-        } else {
+        if (err) setError(translateAuthError(err))
+        else {
           setMessage('注册成功。若开启了邮箱确认，请先查收邮件再登录。')
-          showToast('注册成功', 'ok')
           setMode('signin')
+          setEnterKey((k) => k + 1)
         }
       }
     } finally {
@@ -62,51 +61,47 @@ export function AuthPage() {
     }
   }
 
+  const isSignIn = mode === 'signin'
+
   return (
-    <section className="panel auth-panel">
-      <h1>{mode === 'signin' ? '登录' : '注册'}</h1>
-      <p className="muted">创建专题、追踪巴尔干要闻，并将重要报道收入收藏夹。</p>
+    <div className="auth-wrap" key={enterKey}>
+      <section className="panel auth-card">
+        <h1 className="page-title">{isSignIn ? '登录' : '注册账号'}</h1>
+        <p className="page-sub">保存关键词、筛选相关新闻，并把感兴趣的文章加入收藏夹。</p>
 
-      <form className="form" onSubmit={onSubmit}>
-        <label>
-          邮箱
-          <input
-            type="email"
-            autoComplete="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-        </label>
-        <label>
-          密码
-          <input
-            type="password"
-            autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-            required
-            minLength={6}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </label>
-        {error && <p className="error">{error}</p>}
-        {message && <p className="ok">{message}</p>}
-        <button className="btn" type="submit" disabled={busy}>
-          {busy ? '请稍候…' : mode === 'signin' ? '登录' : '注册'}
+        <form className="form" onSubmit={onSubmit}>
+          <label>
+            邮箱
+            <input
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </label>
+          <label>
+            密码
+            <input
+              type="password"
+              autoComplete={isSignIn ? 'current-password' : 'new-password'}
+              required
+              minLength={6}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </label>
+          {error && <p className="error">{error}</p>}
+          {message && <p className="ok">{message}</p>}
+          <button className="btn btn-solid" type="submit" disabled={busy}>
+            {busy ? '请稍候…' : isSignIn ? '登录' : '注册'}
+          </button>
+        </form>
+
+        <button type="button" className="auth-switch" onClick={switchMode}>
+          {isSignIn ? '没有账号？去注册' : '已有账号？去登录'}
         </button>
-      </form>
-
-      <button
-        type="button"
-        className="linkish"
-        onClick={() => {
-          setMode((m) => (m === 'signin' ? 'signup' : 'signin'))
-          setError(null)
-          setMessage(null)
-        }}
-      >
-        {mode === 'signin' ? '没有账号？去注册' : '已有账号？去登录'}
-      </button>
-    </section>
+      </section>
+    </div>
   )
 }

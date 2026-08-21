@@ -1,4 +1,4 @@
-"""Fetch Serbian media RSS feeds; only store articles matching user keywords."""
+"""Fetch Serbian media RSS feeds; store articles and per-user keyword hits."""
 
 from __future__ import annotations
 
@@ -12,11 +12,22 @@ import feedparser
 import httpx
 from supabase import Client, create_client
 
-from normalize import expand_match_terms, matches_keyword, normalize_for_match
+from normalize import normalize_for_match
+from relevance import filter_matches_with_relevance, stage1_match
+from jobs import ensure_crawl_jobs, ensure_translate_jobs, mark_jobs
 from sources import FEED_SOURCES
 
 
 USER_AGENT = "AutoNewsBot/1.0 (+https://github.com/AutoNews; RSS aggregator)"
+
+# Always keep these feeds in the public pool (guest “随便看看”).
+PREVIEW_SOURCE_NAMES = {
+    "Blic Kultura",
+    "Blic Zabava",
+    "B92 Kultura",
+    "Novosti Kultura",
+    "Variety",
+}
 
 
 def get_supabase() -> Client:
@@ -79,33 +90,41 @@ def entry_to_article(source_name: str, entry: dict[str, Any]) -> dict[str, Any] 
     }
 
 
-def load_match_terms(sb: Client) -> list[str]:
-    result = sb.table("keywords").select("phrase, search_terms").limit(500).execute()
-    terms: list[str] = []
+def load_user_keywords(sb: Client) -> dict[str, list[dict[str, Any]]]:
+    """Map user_id -> that user's keyword rows (for per-keyword strict/loose match)."""
+    try:
+        result = (
+            sb.table("keywords")
+            .select("id, user_id, phrase, search_terms, match_groups, match_mode")
+            .limit(2000)
+            .execute()
+        )
+    except Exception:  # noqa: BLE001
+        result = (
+            sb.table("keywords")
+            .select("id, user_id, phrase, search_terms")
+            .limit(2000)
+            .execute()
+        )
+    by_user: dict[str, list[dict[str, Any]]] = {}
     for row in result.data or []:
-        terms.extend(expand_match_terms(row.get("phrase") or "", row.get("search_terms") or []))
-    # Dedupe
-    seen: set[str] = set()
-    out: list[str] = []
-    for t in terms:
-        key = normalize_for_match(t)
-        if not key or key in seen:
+        uid = row.get("user_id")
+        if not uid:
             continue
-        seen.add(key)
-        out.append(t)
+        by_user.setdefault(uid, []).append(row)
+    return {uid: rows for uid, rows in by_user.items() if rows}
+
+
+def matching_keyword_rows(
+    article: dict[str, Any], user_keywords: dict[str, list[dict[str, Any]]]
+) -> list[tuple[str, dict[str, Any]]]:
+    """Stage-1 recall: (user_id, keyword_row) pairs."""
+    out: list[tuple[str, dict[str, Any]]] = []
+    for uid, rows in user_keywords.items():
+        for row in rows:
+            if stage1_match(article, row):
+                out.append((uid, row))
     return out
-
-
-def article_matches(article: dict[str, Any], terms: list[str]) -> bool:
-    if not terms:
-        return False
-    hay = f"{article.get('title', '')} {article.get('summary', '')}"
-    # Prefer pre-normalized text when present, but still enforce word boundaries.
-    normalized = article.get("raw_text_normalized") or normalize_for_match(hay)
-    for term in terms:
-        if matches_keyword(normalized, term) or matches_keyword(hay, term):
-            return True
-    return False
 
 
 def upsert_articles(sb: Client, articles: list[dict[str, Any]]) -> int:
@@ -120,28 +139,58 @@ def upsert_articles(sb: Client, articles: list[dict[str, Any]]) -> int:
     return total
 
 
-def cleanup_non_matching(sb: Client, terms: list[str]) -> int:
-    """Remove stored articles that no longer match any keyword."""
-    if not terms:
-        # No keywords → clear news pool (stars cascade)
-        existing = sb.table("articles").select("id").limit(2000).execute().data or []
-        ids = [r["id"] for r in existing]
-        deleted = 0
-        for i in range(0, len(ids), 100):
-            chunk = ids[i : i + 100]
-            sb.table("articles").delete().in_("id", chunk).execute()
-            deleted += len(chunk)
-        return deleted
+def resolve_article_ids(sb: Client, urls: list[str]) -> dict[str, str]:
+    """url -> article id"""
+    out: dict[str, str] = {}
+    chunk_size = 100
+    for i in range(0, len(urls), chunk_size):
+        chunk = urls[i : i + chunk_size]
+        rows = sb.table("articles").select("id, url").in_("url", chunk).execute().data or []
+        for row in rows:
+            out[row["url"]] = row["id"]
+    return out
 
-    rows = (
-        sb.table("articles")
-        .select("id, title, summary, raw_text_normalized")
-        .limit(2000)
-        .execute()
-        .data
-        or []
-    )
-    to_delete = [r["id"] for r in rows if not article_matches(r, terms)]
+
+def replace_hits(sb: Client, hits: list[dict[str, str]]) -> tuple[int, int]:
+    """Full rebuild of article_hits for correctness after each crawl."""
+    existing = sb.table("article_hits").select("user_id, article_id").limit(20000).execute().data or []
+    deleted = 0
+    if existing:
+        # delete in chunks by article_id groups
+        ids = list({f"{r['user_id']}|{r['article_id']}" for r in existing})
+        # simpler: delete all via service role — use neq trick on created_at
+        sb.table("article_hits").delete().gte("created_at", "1970-01-01").execute()
+        deleted = len(ids)
+
+    inserted = 0
+    chunk_size = 200
+    for i in range(0, len(hits), chunk_size):
+        chunk = hits[i : i + chunk_size]
+        sb.table("article_hits").upsert(chunk, on_conflict="user_id,article_id").execute()
+        inserted += len(chunk)
+    return inserted, deleted
+
+
+def cleanup_orphan_articles(sb: Client, keep_ids: set[str] | None = None) -> int:
+    """Remove articles that no user currently matches (stars cascade with article)."""
+    articles = sb.table("articles").select("id, source").limit(5000).execute().data or []
+    if not articles:
+        return 0
+    hit_rows = sb.table("article_hits").select("article_id").limit(20000).execute().data or []
+    keep = {r["article_id"] for r in hit_rows}
+    # keep starred articles even without hits
+    star_rows = sb.table("stars").select("article_id").limit(20000).execute().data or []
+    keep |= {r["article_id"] for r in star_rows}
+    if keep_ids:
+        keep |= keep_ids
+    # keep guest-preview culture / movie feeds
+    keep |= {
+        r["id"]
+        for r in articles
+        if (r.get("source") or "") in PREVIEW_SOURCE_NAMES
+    }
+
+    to_delete = [r["id"] for r in articles if r["id"] not in keep]
     for i in range(0, len(to_delete), 100):
         chunk = to_delete[i : i + 100]
         sb.table("articles").delete().in_("id", chunk).execute()
@@ -150,17 +199,23 @@ def cleanup_non_matching(sb: Client, terms: list[str]) -> int:
 
 def crawl() -> None:
     sb = get_supabase()
-    terms = load_match_terms(sb)
-    print(f"Active search terms: {len(terms)}")
-    if not terms:
-        print("No keywords (or AI terms) yet — skipping fetch. Add keywords first.")
-        removed = cleanup_non_matching(sb, [])
-        print(f"Cleared unmatched pool: removed {removed}")
-        return
+    user_keywords = load_user_keywords(sb)
+    print(f"Users with keywords: {len(user_keywords)}")
+    ensure_crawl_jobs(sb, user_keywords)
+    mark_jobs(
+        sb,
+        step="crawl",
+        status="running",
+        detail="正在抓取 RSS 并匹配关键词…",
+        from_statuses=["queued", "running"],
+    )
 
-    matched: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
+    preview_articles: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
     scanned = 0
+    # url -> stage-1 (user_id, keyword_row) pairs
+    url_kw_hits: dict[str, list[tuple[str, dict[str, Any]]]] = {}
 
     for source in FEED_SOURCES:
         try:
@@ -180,14 +235,116 @@ def crawl() -> None:
             if url in seen_urls:
                 continue
             seen_urls.add(url)
-            if article_matches(article, terms):
-                matched.append(article)
 
-    matched = matched[:500]
-    count = upsert_articles(sb, matched)
-    removed = cleanup_non_matching(sb, terms)
+            if source.name in PREVIEW_SOURCE_NAMES:
+                preview_articles.append(article)
+
+            if not user_keywords:
+                continue
+            kw_hits = matching_keyword_rows(article, user_keywords)
+            if not kw_hits:
+                continue
+            candidates.append(article)
+            url_kw_hits[url] = kw_hits
+
+    if not user_keywords:
+        print("No keywords (or AI terms) yet — keeping guest preview pool only.")
+
+    # Public movie/culture pool for guests (dedupe against keyword matches).
+    preview_by_url = {a["url"]: a for a in preview_articles}
+    for a in candidates:
+        preview_by_url.pop(a["url"], None)
+    preview_only = list(preview_by_url.values())[:200]
+
+    candidates = candidates[:500]
+    count = upsert_articles(sb, candidates + preview_only)
+    id_by_url = resolve_article_ids(
+        sb, [a["url"] for a in candidates] + [a["url"] for a in preview_only]
+    )
+
+    stage1_matches: list[dict[str, Any]] = []
+    for article in candidates:
+        url = article["url"]
+        aid = id_by_url.get(url)
+        if not aid:
+            continue
+        for uid, row in url_kw_hits.get(url, []):
+            kid = row.get("id")
+            if not kid:
+                continue
+            stage1_matches.append(
+                {
+                    "user_id": uid,
+                    "keyword_id": kid,
+                    "keyword_phrase": row.get("phrase") or "",
+                    "match_mode": row.get("match_mode") or "",
+                    "match_groups": row.get("match_groups"),
+                    "article_id": aid,
+                    "title": article.get("title") or "",
+                    "summary": article.get("summary") or "",
+                }
+            )
+
+    hits = filter_matches_with_relevance(sb, matches=stage1_matches)
+    inserted, deleted_hits = replace_hits(sb, hits)
+    preview_ids = {id_by_url[u] for u in (a["url"] for a in preview_only) if u in id_by_url}
+    removed = cleanup_orphan_articles(sb, preview_ids)
+
+    # Sample matched article titles for the UI accordion
+    sample_items: list[dict[str, str]] = []
+    seen_aids: set[str] = set()
+    for m in stage1_matches:
+        aid = m.get("article_id")
+        if not aid or aid in seen_aids:
+            continue
+        seen_aids.add(str(aid))
+        sample_items.append(
+            {
+                "id": str(aid),
+                "title": (m.get("title") or "")[:120],
+                "keyword": (m.get("keyword_phrase") or "")[:80],
+            }
+        )
+        if len(sample_items) >= 15:
+            break
+
+    phrases_by_user: dict[str, list[str]] = {}
+    for m in stage1_matches:
+        uid = m.get("user_id")
+        phrase = (m.get("keyword_phrase") or "").strip()
+        if not uid:
+            continue
+        bucket = phrases_by_user.setdefault(uid, [])
+        if phrase and phrase not in bucket:
+            bucket.append(phrase)
+
+    mark_jobs(
+        sb,
+        step="crawl",
+        status="done",
+        detail=f"完成 · 匹配 {len(candidates)} 篇 · hits {inserted}",
+        meta={
+            "counts": {
+                "matched": len(candidates),
+                "hits": inserted,
+                "scanned": scanned,
+            },
+            "items": sample_items,
+            "phrases": sorted({p for ps in phrases_by_user.values() for p in ps}),
+        },
+        from_statuses=["queued", "running"],
+    )
+    hit_users = list({h["user_id"] for h in hits})
+    if hit_users:
+        ensure_translate_jobs(
+            sb,
+            hit_users,
+            detail="等待翻译匹配新闻…",
+            phrases_by_user=phrases_by_user,
+        )
     print(
-        f"Scanned {scanned} · matched {len(matched)} · upserted {count} · removed stale {removed}"
+        f"Scanned {scanned} · matched articles {len(candidates)} · preview kept {len(preview_only)} · "
+        f"upserted {count} · hits {inserted} (replaced {deleted_hits}) · removed orphans {removed}"
     )
 
 

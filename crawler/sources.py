@@ -20,9 +20,13 @@ FEED_SOURCES: list[FeedSource] = [
     # ——— Serbia ———
     FeedSource("Blic", "https://www.blic.rs/rss/vesti", "RS"),
     FeedSource("Blic Politika", "https://www.blic.rs/rss/vesti/politika", "RS"),
+    FeedSource("Blic Kultura", "https://www.blic.rs/rss/kultura", "RS"),
+    FeedSource("Blic Zabava", "https://www.blic.rs/rss/zabava", "RS"),
     FeedSource("B92", "https://www.b92.net/info/rss/vesti.xml", "RS"),
+    FeedSource("B92 Kultura", "https://www.b92.net/info/rss/kultura.xml", "RS"),
     FeedSource("RTS", "https://www.rts.rs/page/stories/ci/rss.html", "RS"),
     FeedSource("Novosti", "https://www.novosti.rs/rss/vesti", "RS"),
+    FeedSource("Novosti Kultura", "https://www.novosti.rs/rss/kultura", "RS"),
     FeedSource("N1 Serbia", "https://n1info.rs/feed/", "RS"),
     FeedSource("Danas", "https://www.danas.rs/feed/", "RS"),
     # ——— Croatia ———
@@ -60,6 +64,7 @@ FEED_SOURCES: list[FeedSource] = [
     FeedSource("N1 Slovenia", "https://n1info.si/feed/", "SI"),
     # ——— Bulgaria ———
     FeedSource("Actualno", "https://www.actualno.com/rss", "BG"),
-    # ——— Regional (English) ———
+    # ——— Regional / entertainment ———
     FeedSource("Balkan Insight", "https://balkaninsight.com/feed/", "REG"),
+    FeedSource("Variety", "https://variety.com/feed/", "REG"),
 ]

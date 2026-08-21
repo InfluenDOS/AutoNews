@@ -1,14 +1,15 @@
-name: Crawl Balkan news RSS
+name: Crawl keyword news RSS
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    # Fixed hourly crawl (independent of on-demand runs from Edge Function)
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,12 +37,20 @@ jobs:
           export AI_MODEL="${AI_MODEL:-deepseek-chat}"
           python process_ai.py --keywords-only
 
-      - name: Crawl RSS (matches only)
+      - name: Crawl RSS (match + relevance)
         working-directory: crawler
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python crawl.py
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+          RELEVANCE_BATCH_SIZE: "12"
+          RELEVANCE_MAX_PER_RUN: "80"
+        run: |
+          export AI_BASE_URL="${AI_BASE_URL:-https://api.deepseek.com}"
+          export AI_MODEL="${AI_MODEL:-deepseek-chat}"
+          python crawl.py
 
       - name: Translate matched articles
         working-directory: crawler

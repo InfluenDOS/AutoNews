@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { useToast } from '../context/ToastContext'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Article } from '../types'
 
@@ -24,13 +23,12 @@ function readingMinutes(text: string) {
 
 export function ArticleDetailPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const { user } = useAuth()
-  const { showToast } = useToast()
   const [article, setArticle] = useState<Article | null>(null)
   const [starred, setStarred] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [starBusy, setStarBusy] = useState(false)
 
   const load = useCallback(async () => {
     if (!id || !isSupabaseConfigured) {
@@ -67,35 +65,23 @@ export function ArticleDetailPage() {
   }, [load])
 
   async function toggleStar() {
-    if (!user || !article || starBusy) return
-    setStarBusy(true)
+    if (!user || !article) return
     if (starred) {
       const { error: err } = await supabase
         .from('stars')
         .delete()
         .eq('user_id', user.id)
         .eq('article_id', article.id)
-      if (err) {
-        setError(err.message)
-        showToast('取消收藏失败', 'error')
-      } else {
-        setStarred(false)
-        showToast('已取消收藏', 'ok')
-      }
+      if (err) setError(err.message)
+      else setStarred(false)
     } else {
       const { error: err } = await supabase.from('stars').insert({
         user_id: user.id,
         article_id: article.id,
       })
-      if (err) {
-        setError(err.message)
-        showToast('收藏失败', 'error')
-      } else {
-        setStarred(true)
-        showToast('已加入收藏', 'ok')
-      }
+      if (err) setError(err.message)
+      else setStarred(true)
     }
-    setStarBusy(false)
   }
 
   const title = useMemo(
@@ -125,7 +111,7 @@ export function ArticleDetailPage() {
     return (
       <article className="reader">
         <p className="error">{error || '未找到这篇新闻。'}</p>
-        <Link to="/" className="btn btn-sm">
+        <Link to="/" className="btn btn-sm btn-outline">
           返回列表
         </Link>
       </article>
@@ -141,16 +127,20 @@ export function ArticleDetailPage() {
           <Link to="/" className="linkish">
             ← 返回列表
           </Link>
-          {user && (
-            <button
-              type="button"
-              className={`star-btn wide ${starred ? 'on' : ''}`}
-              disabled={starBusy}
-              onClick={() => void toggleStar()}
-            >
-              {starBusy ? '处理中…' : starred ? '★ 已收藏' : '☆ 收藏'}
-            </button>
-          )}
+          <button
+            type="button"
+            className={`star-btn wide ${starred ? 'on' : ''}`}
+            onClick={() => {
+              if (!user) {
+                navigate('/auth')
+                return
+              }
+              void toggleStar()
+            }}
+            title={user ? undefined : '登录后即可收藏'}
+          >
+            {starred ? '★ 已收藏' : '☆ 收藏'}
+          </button>
         </div>
 
         <div className="reader-kicker">
@@ -166,7 +156,7 @@ export function ArticleDetailPage() {
         {lead ? <p className="reader-lead">{lead}</p> : null}
 
         {!translated && (
-          <p className="card-hint">中文译本尚未就绪，正文可能仍接近原文摘要。</p>
+          <p className="card-hint">中文改写尚未完成，正文可能仍接近原文摘要。</p>
         )}
       </header>
 
@@ -186,10 +176,10 @@ export function ArticleDetailPage() {
         <div className="origin-card">
           <h2>原文出处</h2>
           <p>
-            本页为根据公开 RSS 标题与摘要改写的中文阅读版，便于家人快速了解，并非媒体全文转载。
+            本页为根据公开 RSS 标题与摘要改写的中文阅读版，并非媒体全文转载。
             完整报道与图片请打开原站。
           </p>
-          <a className="btn" href={article.url} target="_blank" rel="noopener noreferrer">
+          <a className="btn btn-solid" href={article.url} target="_blank" rel="noopener noreferrer">
             打开原文 · {article.source}
           </a>
         </div>

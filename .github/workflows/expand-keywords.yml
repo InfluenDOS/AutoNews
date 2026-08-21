@@ -1,0 +1,33 @@
+name: Expand pending keywords
+
+# Lightweight: AI expand only (no RSS crawl). Backup if Edge Function fails.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  expand:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: crawler/requirements.txt
+      - name: Install dependencies
+        run: pip install -r crawler/requirements.txt
+      - name: Expand keywords
+        working-directory: crawler
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+        run: |
+          export AI_BASE_URL="${AI_BASE_URL:-https://api.deepseek.com}"
+          export AI_MODEL="${AI_MODEL:-deepseek-chat}"
+          python process_ai.py --keywords-only

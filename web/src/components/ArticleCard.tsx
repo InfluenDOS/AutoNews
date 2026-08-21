@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import type { Article } from '../types'
 
 function formatDate(value: string | null) {
@@ -19,63 +19,59 @@ type Props = {
   matchedKeywords?: string[]
   onToggleStar?: () => void
   canStar: boolean
-  starBusy?: boolean
 }
 
-export function ArticleCard({
-  article,
-  starred,
-  matchedKeywords,
-  onToggleStar,
-  canStar,
-  starBusy = false,
-}: Props) {
+export function ArticleCard({ article, starred, matchedKeywords, onToggleStar, canStar }: Props) {
+  const navigate = useNavigate()
   const title = (article.title_zh || '').trim() || article.title
   const summary = (article.summary_zh || '').trim() || article.summary
-  const preview =
-    summary.length > 140 ? `${summary.slice(0, 140).trim()}…` : summary
+  const preview = summary.length > 110 ? `${summary.slice(0, 110).trim()}…` : summary
   const translated = Boolean((article.title_zh || '').trim())
 
   return (
-    <article className="card">
-      <div className="card-meta">
+    <article className="story">
+      <div className="story-meta">
         <span className="source">{article.source}</span>
         <time dateTime={article.published_at ?? undefined}>{formatDate(article.published_at)}</time>
       </div>
-      <h2 className="card-title">
+
+      <h2 className="story-title">
         <Link to={`/article/${article.id}`}>{title}</Link>
       </h2>
-      {preview && <p className="card-summary">{preview}</p>}
-      {!translated && <p className="card-hint">中文译本生成中</p>}
-      <div className="card-actions">
+
+      {preview && <p className="story-summary">{preview}</p>}
+      {!translated && <p className="card-hint">等待中文改写</p>}
+
+      <div className="story-actions">
         {matchedKeywords && matchedKeywords.length > 0 && (
           <div className="tags">
-            {matchedKeywords.map((k) => (
+            {matchedKeywords.slice(0, 3).map((k) => (
               <span key={k} className="tag">
                 {k}
               </span>
             ))}
           </div>
         )}
-        <div className="card-actions-right">
-          <Link className="linkish" to={`/article/${article.id}`}>
-            阅读全文
+        <div className="story-actions-right">
+          <Link className="text-link" to={`/article/${article.id}`}>
+            阅读
           </Link>
-          {canStar && onToggleStar && (
-            <button
-              type="button"
-              className={`star-btn ${starred ? 'on' : ''}`}
-              disabled={starBusy}
-              onClick={(e) => {
-                e.preventDefault()
-                onToggleStar()
-              }}
-              aria-label={starred ? '取消收藏' : '加入收藏'}
-              title={starred ? '从收藏夹移除' : '加入收藏夹'}
-            >
-              {starBusy ? '…' : starred ? '★' : '☆'}
-            </button>
-          )}
+          <button
+            type="button"
+            className={`star-btn ${starred ? 'on' : ''}`}
+            onClick={(e) => {
+              e.preventDefault()
+              if (!canStar || !onToggleStar) {
+                navigate('/auth')
+                return
+              }
+              onToggleStar()
+            }}
+            aria-label={!canStar ? '登录后收藏' : starred ? '取消收藏' : '加入收藏'}
+            title={!canStar ? '登录后即可收藏' : starred ? '取消收藏' : '加入收藏'}
+          >
+            {starred ? '★' : '☆'}
+          </button>
         </div>
       </div>
     </article>

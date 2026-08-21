@@ -1,4 +1,4 @@
-"""Expand Chinese keyword phrases and translate Serbian articles to Chinese."""
+"""Expand Chinese keyword phrases and rewrite foreign-language articles into Chinese."""
 
 from __future__ import annotations
 
@@ -7,27 +7,35 @@ import sys
 from typing import Any
 
 from ai_client import ai_configured, chat_json
-from normalize import normalize_for_match
 from crawl import get_supabase
+from jobs import job_title, mark_jobs, phrase_label
+from normalize import (
+    clean_match_groups,
+    expand_match_terms,
+    normalize_for_match,
+    suggest_match_mode,
+)
 
 
-EXPAND_SYSTEM = """你是巴尔干半岛新闻检索助手。用户用中文描述话题（可能较模糊）。
-媒体覆盖塞尔维亚、克罗地亚、波黑、黑山、北马其顿、阿尔巴尼亚、科索沃、斯洛文尼亚、保加利亚及区域英语媒体。
-
-请提取能在上述媒体标题/摘要中命中的检索词。
-
-输出 JSON：{"search_terms":["..."],"ai_note":"..."}
+EXPAND_SYSTEM = """你是巴尔干多语种新闻检索助手。用户用中文描述订阅意图。
+只输出 JSON：
+{
+  "match_mode": "loose" 或 "strict",
+  "match_groups": [["variantA","variantB"], ["variantC"]],
+  "search_terms": ["phrase1","phrase2"],
+  "ai_note": "一句中文说明"
+}
 
 硬性规则：
-1. search_terms 给 6～12 个。以塞尔维亚-克罗地亚-波斯尼亚语（拉丁字母）为核心（三国媒体互通），再按话题需要补充：马其顿语/保加利亚语、阿尔巴尼亚语、斯洛文尼亚语、英语专名。
-2. 对「选举」这类话题，必须包含核心词及其常见形式，例如：izbori、izbore、izborima、izborna、izborni、glasanje、zgjedhjet（阿语）；可再加短语如 parlamentarni izbori。
-3. 禁止过宽单词语：Kina、kineski、migranti、Srbija、Balkan、Beograd、vesti、premijer、premijerka、predsednik、vlada。
-4. 禁止绑死年份（不要 izbori 2023 / 2024），除非用户明确只要某年。
-5. 注意假朋友：premijera=电影首映，premijer=总理。
-6. 专名给常见写法（Vučić/Вучић、Zagreb、Sarajevo、Tirana 等）；ai_note 一句中文；不要 Markdown。"""
+1. match_groups / search_terms 必须是目标媒体原文检索词（塞尔维亚语拉丁字母、克罗地亚语、波斯尼亚语、英语等），严禁中文。
+2. 短话题（如「武契奇」「选举」）：match_mode=loose；search_terms 给 6～10 个多词短语（OR）；match_groups 可空。
+3. 长意图/多要素（如「中国籍非法移民在塞尔维亚」）：match_mode=strict；match_groups 至少 2～4 组要素（组间 AND，组内变体 OR）。
+   示例：[["kineski","kineskih","Chinese","Kinezi"],["ilegalni migranti","ilegalne migracije","illegal migrants"],["Srbija","Srbiji","Serbia"]]。
+4. 不要把过宽单词单独成组（如单独的 China、migrant、Balkan、news、Serbia）。
+5. ai_note 用中文；不要 Markdown。"""
 
 
-TRANSLATE_SYSTEM = """你是新华社/财新风格的国际新闻改写编辑。输入可能是塞尔维亚语（拉丁或西里尔）或英语的耸动标题+摘要。
+TRANSLATE_SYSTEM = """你是新华社/财新风格的国际新闻改写编辑。输入可能是外语（含塞尔维亚语拉丁/西里尔、英语等）的标题+摘要。
 你的任务不是逐词翻译，而是先理解事实，再用通顺的简体中文写成一篇可独立阅读的短讯。
 
 只输出 JSON：
@@ -42,46 +50,122 @@ TRANSLATE_SYSTEM = """你是新华社/财新风格的国际新闻改写编辑。
 1. 标题：像国内新闻客户端，15～28字为宜；去掉原文全大写、感叹号堆砌、标题党腔。
 2. 导语：一句话交代「谁、做了什么、结果/影响」。
 3. 正文：完整可读，包含背景与关键细节；语气冷静客观，像正式报道，不要口语、不要网感梗。
-4. 人名地名用通行中文：Vučić/Вучић=武契奇，Beograd=贝尔格莱德，Srbija=塞尔维亚，Kosovo=科索沃，EU=欧盟，NATO=北约，dinar=第纳尔。生僻名用「中文（原文）」。
-5. 严禁机翻腔：不要「进行了…的表示」「关于…一事」「据报道称称」；不要把塞尔维亚语词序硬搬进中文。
+4. 人名地名用通行中文；若无通行译名，用「中文（原文）」。已知对照可参考：Vučić/Вучић=武契奇，Beograd=贝尔格莱德，Srbija=塞尔维亚，Kosovo=科索沃，EU=欧盟，NATO=北约。
+5. 严禁机翻腔：不要「进行了…的表示」「关于…一事」「据报道称称」；不要把外语句式硬搬进中文。
 6. 只使用输入里有的信息，可改写重组，不可编造数字、引语、原因。
 7. 不要 Markdown，不要解释。"""
 
 
+def _ensure_intent_locations(phrase: str, groups: list[list[str]]) -> list[list[str]]:
+    """If the Chinese intent names a place, keep a foreign-language location group."""
+    flat = " ".join(alt for g in groups for alt in g).casefold()
+    out = list(groups)
+    if any(x in phrase for x in ("塞尔维亚", "塞国")) or "serbia" in phrase.casefold():
+        if not any(x in flat for x in ("srbij", "serbia")):
+            out.append(["Srbija", "Srbiji", "Serbia", "Serbian"])
+    if "巴尔干" in phrase and not any(x in flat for x in ("balkan", "balkan")):
+        out.append(["Balkan", "Balkanu", "Western Balkans"])
+    return out[:6]
+
+
 def expand_keyword_phrase(phrase: str) -> dict[str, Any]:
-    data = chat_json(EXPAND_SYSTEM, f"用户输入：{phrase}")
-    terms = data.get("search_terms") or []
-    if not isinstance(terms, list):
-        terms = []
-    cleaned = []
-    seen: set[str] = set()
-    for t in terms:
-        s = str(t).strip()
-        if not s:
-            continue
-        key = normalize_for_match(s)
-        if key in seen:
-            continue
-        seen.add(key)
-        cleaned.append(s[:80])
+    suggested = suggest_match_mode(phrase)
+    data = chat_json(
+        EXPAND_SYSTEM,
+        (
+            f"用户输入：{phrase}\n"
+            f"（建议 match_mode={suggested}；检索词必须是塞/英等原文，不要中文；"
+            f"若意图含地点，match_groups 必须单独有一组地点变体）"
+        ),
+    )
+
+    groups = clean_match_groups(data.get("match_groups"))
+    # Drop any Chinese leftovers from a bad model response
+    groups = [
+        [alt for alt in g if not any("\u4e00" <= ch <= "\u9fff" for ch in alt)]
+        for g in groups
+    ]
+    groups = [g for g in groups if g]
+    groups = _ensure_intent_locations(phrase, groups)
+
+    terms_raw = data.get("search_terms") or []
+    if not isinstance(terms_raw, list):
+        terms_raw = []
+    terms_raw = [
+        str(t)
+        for t in terms_raw
+        if str(t).strip() and not any("\u4e00" <= ch <= "\u9fff" for ch in str(t))
+    ]
+    terms = expand_match_terms(phrase, terms_raw)
+
+    ai_mode = str(data.get("match_mode") or "").strip()
+    want_strict = (ai_mode == "strict" or suggested == "strict") and len(groups) >= 2
+    if want_strict:
+        mode = "strict"
+        flat: list[str] = []
+        seen: set[str] = set()
+        for g in groups:
+            for alt in g:
+                key = normalize_for_match(alt)
+                if key and key not in seen:
+                    seen.add(key)
+                    flat.append(alt)
+        terms = flat[:16] or terms
+    else:
+        mode = "loose"
+        groups = []
+        if not terms:
+            terms = terms_raw[:8] or [phrase]
+
     note = str(data.get("ai_note") or "").strip()[:300]
-    return {"search_terms": cleaned[:12], "ai_note": note}
+    return {
+        "match_mode": mode,
+        "match_groups": groups,
+        "search_terms": terms[:12],
+        "ai_note": note,
+    }
+
+
+def _keyword_needs_expand(row: dict[str, Any], force: bool) -> bool:
+    if force:
+        return True
+    terms = row.get("search_terms") or []
+    groups = row.get("match_groups") or []
+    phrase = (row.get("phrase") or "").strip()
+    if not terms:
+        return True
+    # Re-expand long intents that never got structured groups
+    if suggest_match_mode(phrase) == "strict":
+        cleaned = clean_match_groups(groups)
+        if len(cleaned) < 2:
+            return True
+    return False
 
 
 def process_keywords(limit: int = 30, force: bool = False) -> int:
     sb = get_supabase()
-    result = (
-        sb.table("keywords")
-        .select("id, phrase, search_terms")
-        .limit(200)
-        .execute()
-    )
+    try:
+        result = (
+            sb.table("keywords")
+            .select("id, phrase, search_terms, match_groups, match_mode")
+            .limit(200)
+            .execute()
+        )
+    except Exception:  # noqa: BLE001
+        result = sb.table("keywords").select("id, phrase, search_terms").limit(200).execute()
     rows = result.data or []
-    if force:
-        pending = rows[:limit]
-    else:
-        pending = [r for r in rows if not (r.get("search_terms") or [])][:limit]
+    pending = [r for r in rows if _keyword_needs_expand(r, force)][:limit]
     print(f"Keywords pending AI expansion: {len(pending)}")
+    if pending:
+        phrases = [str(r.get("phrase") or "") for r in pending]
+        mark_jobs(
+            sb,
+            step="expand",
+            status="running",
+            title=job_title("扩展", phrases),
+            detail=f"正在扩展 {phrase_label(phrases)} …",
+            from_statuses=["queued", "running"],
+        )
     done = 0
     for row in pending:
         phrase = (row.get("phrase") or "").strip()
@@ -89,21 +173,41 @@ def process_keywords(limit: int = 30, force: bool = False) -> int:
             continue
         try:
             expanded = expand_keyword_phrase(phrase)
-            terms = expanded["search_terms"]
-            if not terms:
-                terms = [phrase]
+            terms = expanded["search_terms"] or [phrase]
+            groups = expanded["match_groups"]
+            mode = expanded["match_mode"]
             normalized = " ".join(normalize_for_match(t) for t in terms)
-            sb.table("keywords").update(
-                {
-                    "search_terms": terms,
-                    "ai_note": expanded.get("ai_note") or "",
-                    "normalized_phrase": normalized[:2000] or normalize_for_match(phrase),
-                }
-            ).eq("id", row["id"]).execute()
+            payload = {
+                "search_terms": terms,
+                "ai_note": expanded.get("ai_note") or "",
+                "normalized_phrase": normalized[:2000] or normalize_for_match(phrase),
+                "match_groups": groups,
+                "match_mode": mode,
+            }
+            try:
+                sb.table("keywords").update(payload).eq("id", row["id"]).execute()
+            except Exception:  # noqa: BLE001
+                payload.pop("match_groups", None)
+                payload.pop("match_mode", None)
+                sb.table("keywords").update(payload).eq("id", row["id"]).execute()
             done += 1
-            print(f"  expanded: {phrase!r} -> {terms}")
+            print(f"  expanded: {phrase!r} mode={mode} groups={groups} terms={terms}")
         except Exception as exc:  # noqa: BLE001
             print(f"  FAILED keyword {row.get('id')}: {exc}", file=sys.stderr)
+    if pending:
+        phrases = [str(r.get("phrase") or "") for r in pending]
+        mark_jobs(
+            sb,
+            step="expand",
+            status="done" if done else "error",
+            detail=f"扩展完成 {done}/{len(pending)} · {phrase_label(phrases)}",
+            meta={
+                "counts": {"done": done, "total": len(pending)},
+                "phrases": [p for p in phrases if p],
+                "items": [{"title": p} for p in phrases if p][:12],
+            },
+            from_statuses=["queued", "running"],
+        )
     return done
 
 
@@ -167,9 +271,25 @@ def translate_articles(limit: int = 40, force: bool = False) -> int:
     rows = rows[:limit]
     print(f"Articles pending Chinese rewrite: {len(rows)} (force={force}, body_col={with_body})")
     if not rows:
+        mark_jobs(
+            sb,
+            step="translate",
+            status="done",
+            detail="无需翻译",
+            from_statuses=["queued", "running"],
+        )
         return 0
 
+    mark_jobs(
+        sb,
+        step="translate",
+        status="running",
+        detail=f"正在翻译 {len(rows)} 篇…",
+        from_statuses=["queued", "running"],
+    )
+
     done = 0
+    items: list[dict[str, str]] = []
     for idx, row in enumerate(rows, start=1):
         try:
             out = translate_one(row)
@@ -184,15 +304,33 @@ def translate_articles(limit: int = 40, force: bool = False) -> int:
                 payload["lead_zh"] = out["lead_zh"]
                 payload["body_zh"] = out["body_zh"]
             else:
-                # Fallback: pack lead+body into summary_zh for older schema
                 payload["summary_zh"] = "\n\n".join(
                     x for x in [out["lead_zh"], out["body_zh"]] if x
                 )[:4000]
             sb.table("articles").update(payload).eq("id", row["id"]).execute()
             done += 1
+            items.append(
+                {
+                    "id": str(row.get("id") or ""),
+                    "title": out["title_zh"],
+                    "summary": (out.get("summary_zh") or "")[:120],
+                }
+            )
             print(f"  [{idx}/{len(rows)}] {out['title_zh']}")
         except Exception as exc:  # noqa: BLE001
             print(f"  FAILED {row.get('id')}: {exc}", file=sys.stderr)
+
+    mark_jobs(
+        sb,
+        step="translate",
+        status="done" if done else "error",
+        detail=f"翻译完成 {done}/{len(rows)}",
+        meta={
+            "counts": {"done": done, "total": len(rows)},
+            "items": items[:20],
+        },
+        from_statuses=["queued", "running"],
+    )
     return done
 
 

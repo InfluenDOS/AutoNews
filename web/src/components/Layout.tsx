@@ -1,221 +1,362 @@
-import { useState, type FormEvent } from 'react'
-import { Link, NavLink } from 'react-router-dom'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { useKeywordWorkspace } from '../context/KeywordWorkspace'
-import { useToast } from '../context/ToastContext'
-import { Spinner } from './Spinner'
+import { useJobs } from '../context/JobsContext'
+import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
+import { loadDailyPoem, type DailyPoem } from '../lib/dailyPoem'
+import { ProcessBanner } from './ProcessBanner'
+import { BrandLogo } from './BrandLogo'
+import {
+  IconChevron,
+  IconHash,
+  IconKeywords,
+  IconLogin,
+  IconLogout,
+  IconPlus,
+  IconStar,
+  IconTrash,
+} from './NavIcons'
+
+const STORAGE_KEY = 'autonews-sidebar-collapsed'
+const KW_OPEN_KEY = 'autonews-kw-open-v2'
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const { user, signOut, configured } = useAuth()
-  const { showToast } = useToast()
-  const {
-    keywords,
-    selectedId,
-    selectKeyword,
-    addKeyword,
-    deleteKeyword,
-    collapsed,
-    setCollapsed,
-    saving,
-    loading: kwLoading,
-  } = useKeywordWorkspace()
+  const { keywords, addKeyword, deleteKeyword } = useKeywords()
+  const { refreshJobs } = useJobs()
+  const navigate = useNavigate()
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const [kwOpen, setKwOpen] = useState(() => {
+    try {
+      const v = localStorage.getItem(KW_OPEN_KEY)
+      return v === null ? false : v === '1'
+    } catch {
+      return false
+    }
+  })
   const [adding, setAdding] = useState(false)
-  const [phrase, setPhrase] = useState('')
+  const [draft, setDraft] = useState('')
+  const [addBusy, setAddBusy] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const addFormRef = useRef<HTMLFormElement>(null)
+  const [poem, setPoem] = useState<DailyPoem | null>(null)
 
-  async function onSignOut() {
-    await signOut()
-    showToast('您已安全退出', 'info')
+  function cancelAdd() {
+    if (addBusy) return
+    setAdding(false)
+    setDraft('')
+    setAddError(null)
   }
 
-  async function onAdd(e: FormEvent) {
-    e.preventDefault()
-    const row = await addKeyword(phrase)
-    if (row) {
-      setPhrase('')
-      setAdding(false)
-      setCollapsed(false)
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, collapsed ? '1' : '0')
+    } catch {
+      /* ignore */
     }
+    if (collapsed) cancelAdd()
+  }, [collapsed])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(KW_OPEN_KEY, kwOpen ? '1' : '0')
+    } catch {
+      /* ignore */
+    }
+  }, [kwOpen])
+
+  useEffect(() => {
+    if (adding) {
+      setKwOpen(true)
+      window.setTimeout(() => inputRef.current?.focus(), 50)
+    }
+  }, [adding])
+
+  useEffect(() => {
+    if (!adding) return
+    const onPointerDown = (e: PointerEvent) => {
+      const form = addFormRef.current
+      if (!form) return
+      if (form.contains(e.target as Node)) return
+      cancelAdd()
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [adding, addBusy])
+
+  useEffect(() => {
+    let cancelled = false
+    void loadDailyPoem()
+      .then((p) => {
+        if (!cancelled) setPoem(p)
+      })
+      .catch(() => {
+        if (!cancelled) setPoem(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function onAddSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!user || addBusy) return
+    setAddError(null)
+    setAddBusy(true)
+    void refreshJobs()
+    const result = await addKeyword(draft)
+    await refreshJobs()
+    setAddBusy(false)
+    if (result.error) {
+      setAddError(result.error)
+      return
+    }
+    setDraft('')
+    setAdding(false)
+    if (result.id) navigate(`/k/${result.id}`)
+  }
+
+  async function onDeleteKeyword(id: string, phrase: string) {
+    if (!window.confirm(`确定删除关键词「${phrase}」？\n删除后不可恢复。`)) return
+    const result = await deleteKeyword(id)
+    if (result.error) {
+      window.alert(result.error)
+      return
+    }
+    navigate('/keywords')
   }
 
   return (
     <div className={`app-shell${collapsed ? ' sidebar-collapsed' : ''}`}>
-      <aside className="sidebar" aria-label="专题导航" data-collapsed={collapsed ? 'true' : 'false'}>
-        <div className="side-top">
-          <Link to="/" className="side-brand" title="AutoNews 巴尔干时讯">
-            <span className="side-logo">AN</span>
-            <span className="side-brand-copy">
-              <strong>AutoNews</strong>
-              <small>巴尔干时讯</small>
+      <div className="stage-bg" aria-hidden="true">
+        <div className="stage-photo" />
+        <div className="stage-shade" />
+        <div className="stage-blob stage-blob-a" />
+        <div className="stage-blob stage-blob-b" />
+      </div>
+
+      <aside className="sidebar" aria-label="主导航">
+        <div className="sidebar-body">
+          <Link to="/" className="side-brand" title="AutoNews">
+            <BrandLogo />
+            <span className="brand-name">
+              AutoNews
+              <small>关键词订阅新闻</small>
             </span>
           </Link>
-          <button
-            type="button"
-            className="side-collapse"
-            onClick={() => setCollapsed(!collapsed)}
-            aria-expanded={!collapsed}
-            aria-label={collapsed ? '展开侧栏' : '收起侧栏'}
-            title={collapsed ? '展开' : '收起'}
-          >
-            <span className="side-collapse-ico side-collapse-ico-desktop" aria-hidden="true">
-              {collapsed ? '›' : '‹'}
-            </span>
-            <span className="side-collapse-ico side-collapse-ico-mobile" aria-hidden="true">
-              {collapsed ? '☰' : '▴'}
-            </span>
-          </button>
-        </div>
 
-        {user ? (
-          <div className="kw-rail">
-            <p className="kw-rail-label">我的专题</p>
-            <div className="kw-rail-list" role="tablist" aria-label="专题列表">
-              {kwLoading && keywords.length === 0 ? (
-                <p className="kw-rail-empty">
-                  <span className="kw-rail-empty-full">正在载入…</span>
-                  <span className="kw-rail-empty-mini" aria-hidden="true">
-                    …
+          <nav id="side-nav" className="side-nav">
+            <div className={`side-group${kwOpen ? '' : ' is-folded'}`}>
+              <div className="side-item-row">
+                <NavLink to="/keywords" className="side-item side-item-grow" title="关键词" end>
+                  <span className="nav-icon" aria-hidden>
+                    <IconKeywords />
                   </span>
-                </p>
-              ) : keywords.length === 0 ? (
-                <p className="kw-rail-empty kw-rail-empty-only-expanded">尚未创建专题</p>
-              ) : (
-                keywords.map((k) => {
-                  const pending = !(k.search_terms || []).length
-                  const active = k.id === selectedId
-                  const initial = Array.from(k.phrase.trim())[0] || '·'
-                  return (
-                    <div key={k.id} className={`kw-rail-item${active ? ' active' : ''}`}>
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={active}
-                        className="kw-rail-btn"
-                        title={k.phrase}
-                        onClick={() => selectKeyword(k.id)}
-                      >
-                        {pending && <Spinner size="sm" />}
-                        <span className="kw-rail-initial" aria-hidden="true">
-                          {initial}
-                        </span>
-                        <span className="kw-rail-text">{k.phrase}</span>
-                      </button>
-                      {active && (
-                        <button
-                          type="button"
-                          className="kw-rail-del"
-                          title="移除专题"
-                          disabled={saving}
-                          onClick={() => void deleteKeyword(k.id)}
-                        >
-                          ×
-                        </button>
-                      )}
-                    </div>
-                  )
-                })
-              )}
-            </div>
-
-            <div className="kw-rail-add">
-              {adding && !collapsed ? (
-                <form className="kw-add-form" onSubmit={(e) => void onAdd(e)}>
-                  <input
-                    type="text"
-                    value={phrase}
-                    onChange={(e) => setPhrase(e.target.value)}
-                    placeholder="用一句话描述关注主题…"
-                    maxLength={200}
-                    autoFocus
-                    disabled={saving}
-                    required
-                  />
-                  <div className="kw-add-actions">
-                    <button className="btn btn-sm" type="submit" disabled={saving}>
-                      {saving ? '提交中…' : '创建'}
-                    </button>
-                    <button
-                      className="btn btn-sm btn-ghost"
-                      type="button"
-                      disabled={saving}
-                      onClick={() => {
-                        setAdding(false)
-                        setPhrase('')
-                      }}
-                    >
-                      取消
-                    </button>
-                  </div>
-                </form>
-              ) : (
+                  <span className="nav-label">关键词</span>
+                </NavLink>
                 <button
                   type="button"
-                  className="kw-add-btn"
-                  title="新建专题"
-                  aria-label="新建专题"
-                  disabled={saving}
-                  onClick={() => {
-                    setCollapsed(false)
-                    setAdding(true)
+                  className="side-fold"
+                  aria-expanded={kwOpen}
+                  aria-controls="side-kw-children"
+                  title={kwOpen ? '收起关键词列表' : '展开关键词列表'}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setKwOpen((v) => !v)
                   }}
                 >
-                  +
+                  <IconChevron />
                 </button>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="kw-rail-guest">
-            <p>登录后即可创建专题，持续追踪巴尔干半岛要闻。</p>
-            <NavLink className="btn btn-sm" to="/auth">
-              登录 / 注册
-            </NavLink>
-          </div>
-        )}
+              </div>
 
-        <nav className="side-nav side-nav-foot">
-          <NavLink to="/stars" title="收藏夹">
-            <span className="side-nav-ico" aria-hidden="true">
-              ★
-            </span>
-            <span className="side-nav-label">收藏夹</span>
-          </NavLink>
-          {user ? (
-            <button
-              type="button"
-              className="side-logout"
-              title="退出"
-              onClick={() => void onSignOut()}
-            >
-              <span className="side-nav-ico" aria-hidden="true">
-                ⎋
+              <div
+                id="side-kw-children"
+                className="side-children-panel"
+                aria-hidden={!kwOpen}
+              >
+                <div className="side-children">
+                  {user &&
+                    keywords.map((k) => (
+                      <div key={k.id} className="side-kw-row">
+                        <NavLink
+                          to={`/k/${k.id}`}
+                          className="side-item side-item-child side-item-grow"
+                          title={k.phrase}
+                          tabIndex={kwOpen ? undefined : -1}
+                        >
+                          <span className="nav-icon" aria-hidden>
+                            <IconHash />
+                          </span>
+                          <span className="nav-label">{k.phrase}</span>
+                          {!keywordAiReady(k) && (
+                            <span
+                              className="kw-spinner"
+                              title="AI 处理中"
+                              aria-label="加载中"
+                            />
+                          )}
+                        </NavLink>
+                        <button
+                          type="button"
+                          className="side-kw-delete"
+                          title={`删除「${k.phrase}」`}
+                          tabIndex={kwOpen ? undefined : -1}
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            void onDeleteKeyword(k.id, k.phrase)
+                          }}
+                        >
+                          <IconTrash />
+                        </button>
+                      </div>
+                    ))}
+
+                  {user && !collapsed ? (
+                    adding ? (
+                      <form
+                        ref={addFormRef}
+                        className="side-add-form"
+                        onSubmit={(e) => void onAddSubmit(e)}
+                      >
+                        <span className="nav-icon" aria-hidden>
+                          <IconPlus />
+                        </span>
+                        <input
+                          ref={inputRef}
+                          type="text"
+                          className="side-add-input"
+                          placeholder="输入关键词…"
+                          value={draft}
+                          maxLength={200}
+                          disabled={addBusy}
+                          onChange={(e) => setDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') cancelAdd()
+                          }}
+                        />
+                        <button
+                          type="submit"
+                          className="side-add-submit"
+                          disabled={addBusy || !draft.trim()}
+                        >
+                          {addBusy ? '…' : '添加'}
+                        </button>
+                        {addError && <p className="side-add-error">{addError}</p>}
+                      </form>
+                    ) : (
+                      <button
+                        type="button"
+                        className="side-item side-item-child side-add"
+                        title="添加关键词"
+                        tabIndex={kwOpen ? undefined : -1}
+                        onClick={() => {
+                          setAddError(null)
+                          setAdding(true)
+                        }}
+                      >
+                        <span className="nav-icon" aria-hidden>
+                          <IconPlus />
+                        </span>
+                        <span className="nav-label">添加关键词</span>
+                      </button>
+                    )
+                  ) : !user && !collapsed ? (
+                    <span
+                      className="side-item side-item-child side-add is-disabled"
+                      title="登录后才能添加关键词"
+                      aria-disabled="true"
+                    >
+                      <span className="nav-icon" aria-hidden>
+                        <IconPlus />
+                      </span>
+                      <span className="nav-label">添加关键词</span>
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <NavLink to="/stars" className="side-item" title="收藏夹">
+              <span className="nav-icon" aria-hidden>
+                <IconStar />
               </span>
-              <span className="side-nav-label">退出</span>
-            </button>
-          ) : (
-            <NavLink to="/auth" title="登录">
-              <span className="side-nav-ico" aria-hidden="true">
-                ⌁
-              </span>
-              <span className="side-nav-label">登录 / 注册</span>
+              <span className="nav-label">收藏夹</span>
             </NavLink>
+
+            {!user ? (
+              <NavLink to="/auth" className="side-item" title="登录 / 注册">
+                <span className="nav-icon" aria-hidden>
+                  <IconLogin />
+                </span>
+                <span className="nav-label">登录 / 注册</span>
+              </NavLink>
+            ) : (
+              <button
+                type="button"
+                className="side-item side-logout"
+                title="退出登录"
+                onClick={() => {
+                  if (window.confirm('确定要退出登录吗？')) {
+                    void signOut()
+                  }
+                }}
+              >
+                <span className="nav-icon" aria-hidden>
+                  <IconLogout />
+                </span>
+                <span className="nav-label">退出登录</span>
+              </button>
+            )}
+          </nav>
+
+          {poem && (
+            <div className="side-poem">
+              <p className="side-poem-text">{poem.text}</p>
+              <p className="side-poem-meta">
+                —— {poem.author} · {poem.source}
+              </p>
+            </div>
           )}
-        </nav>
+        </div>
+
+        <button
+          type="button"
+          className="side-toggle"
+          onClick={() => setCollapsed((v) => !v)}
+          aria-expanded={!collapsed}
+          aria-controls="side-nav"
+          title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+        >
+          <span className="side-toggle-rail" aria-hidden />
+          <span className="side-toggle-icon" aria-hidden>
+            ‹
+          </span>
+        </button>
       </aside>
 
       <div className="content-shell">
-        <div className="content-atmosphere" aria-hidden="true">
-          <div
-            className="content-atmosphere-blur"
-            style={{ backgroundImage: 'url(./images/mountain-mist.jpg)' }}
-          />
-          <div className="content-atmosphere-veil" />
-        </div>
         {!configured && (
-          <div className="banner warn">服务尚未完成配置，请联系管理员完成初始化。</div>
+          <div className="banner warn">请先配置 Supabase 并完成数据库迁移。</div>
         )}
-        <main className="main fade-rise">{children}</main>
+
+        <ProcessBanner />
+
+        <main className="main-stage">{children}</main>
+
         <footer className="footer">
-          <p>精选摘要 · 注明出处 · 定时更新 · 不转载全文</p>
+          <p>
+            © {new Date().getFullYear()} AutoNews ·{' '}
+            <a href="mailto:speechlessgorilla@gmail.com">speechlessgorilla@gmail.com</a>
+          </p>
         </footer>
       </div>
     </div>

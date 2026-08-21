@@ -23,12 +23,13 @@ def _settings() -> tuple[str, str, str]:
     return key, base, model
 
 
-def chat_json(system: str, user: str, *, temperature: float = 0.2) -> dict[str, Any]:
+def chat_json(system: str, user: str, *, temperature: float = 0.2, max_tokens: int = 600) -> dict[str, Any]:
     key, base, model = _settings()
     url = f"{base}/v1/chat/completions"
     payload = {
         "model": model,
         "temperature": temperature,
+        "max_tokens": max_tokens,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},

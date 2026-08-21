@@ -197,6 +197,11 @@ const SR_SUFFIXES = [
 const FALSE_FRIEND_HITS: Record<string, ReadonlySet<string>> = {
   premijer: new Set(['premijera']),
   premijerka: new Set(['premijera']),
+  // izbor = "choice/selection"; izbori / izbore / … = "elections"
+  izbori: new Set(['izbor']),
+  izbore: new Set(['izbor']),
+  izborima: new Set(['izbor']),
+  izborite: new Set(['izbor']),
 }
 
 function lightStem(word: string): string {
@@ -267,17 +272,7 @@ function matchesToken(haystack: string, token: string): boolean {
 }
 
 const MATCH_STOPWORDS = new Set([
-  'srbija',
-  'serbia',
-  'srbiji',
-  'srbiju',
-  'srbijom',
-  'balkan',
-  'beograd',
-  'belgrade',
-  'evropa',
-  'europa',
-  'europe',
+  // Function words only — place names must stay in multi-word AND matching
   'vesti',
   'news',
   'world',
@@ -356,6 +351,25 @@ const BROAD_SINGLE_TERMS = new Set([
   'predsednica',
   'vlade',
   'vlada',
+  // Places — ok inside phrases, too broad alone
+  'srbija',
+  'serbia',
+  'srbiji',
+  'srbiju',
+  'srbijom',
+  'balkan',
+  'beograd',
+  'belgrade',
+  'evropa',
+  'europa',
+  'europe',
+  // Climate alone matches any "Season 3" trailer
+  'climate',
+  'weather',
+  'season',
+  'seasons',
+  'temperature',
+  'precipitation',
 ])
 
 /** Prefer AI phrases; also keep distinctive content cores for inflection matching. */
@@ -388,4 +402,88 @@ export function keywordMatchTerms(keyword: {
     out.push(keyword.phrase.trim())
   }
   return out
+}
+
+function cleanMatchGroups(raw: unknown): string[][] {
+  if (!Array.isArray(raw)) return []
+  const groups: string[][] = []
+  for (const g of raw) {
+    if (!Array.isArray(g)) continue
+    const cleaned: string[] = []
+    const seen = new Set<string>()
+    for (const item of g) {
+      const s = String(item || '').trim()
+      if (!s) continue
+      const key = normalizeForMatch(s)
+      if (!key || seen.has(key) || MATCH_STOPWORDS.has(key) || /^\d+$/.test(key)) continue
+      if (!s.includes(' ') && BROAD_SINGLE_TERMS.has(key)) continue
+      seen.add(key)
+      cleaned.push(s)
+    }
+    if (cleaned.length) groups.push(cleaned)
+  }
+  return groups
+}
+
+export function suggestMatchMode(phrase: string): 'loose' | 'strict' {
+  const p = phrase.trim()
+  const cjk = [...p].filter((ch) => ch >= '\u4e00' && ch <= '\u9fff').length
+  if (cjk >= 8 || p.length >= 24) return 'strict'
+  return 'loose'
+}
+
+/** Multi-facet / strict keywords use stage-2 relevance when available. */
+export function keywordNeedsRelevance(
+  keyword: {
+    match_groups?: string[][] | null
+    match_mode?: string | null
+  },
+): boolean {
+  const groups = cleanMatchGroups(keyword.match_groups)
+  if (groups.length >= 2) return true
+  return keyword.match_mode === 'strict' && groups.length >= 2
+}
+
+/**
+ * Match one keyword. Multi-facet keywords require a cached stage-2 `relevant=true`
+ * when the map is provided; otherwise use rule recall for loose topics.
+ */
+export function articleMatchesKeyword(
+  article: {
+    id?: string
+    title: string
+    summary: string
+    raw_text_normalized?: string
+  },
+  keyword: {
+    id?: string
+    phrase: string
+    search_terms?: string[] | null
+    match_groups?: string[][] | null
+    match_mode?: string | null
+  },
+  relevance?: Map<string, boolean>,
+): boolean {
+  const needsRerank = keywordNeedsRelevance(keyword)
+
+  if (needsRerank && relevance && keyword.id && article.id) {
+    const key = `${keyword.id}:${article.id}`
+    if (relevance.has(key)) return relevance.get(key) === true
+    // No score yet for this pair — do not attribute another keyword's hit here
+    return false
+  }
+
+  const mode =
+    keyword.match_mode === 'strict' || keyword.match_mode === 'loose'
+      ? keyword.match_mode
+      : suggestMatchMode(keyword.phrase)
+  const groups = cleanMatchGroups(keyword.match_groups)
+
+  // Without relevance table loaded: soft half-group recall (align crawler stage-1)
+  if ((mode === 'strict' || groups.length >= 2) && groups.length >= 2) {
+    const hits = groups.filter((group) => articleMatchesKeywords(article, group)).length
+    const need = Math.max(1, Math.ceil(groups.length / 2))
+    return hits >= need
+  }
+  return articleMatchesKeywords(article, keywordMatchTerms(keyword))
 }

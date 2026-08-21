@@ -1,0 +1,126 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react'
+import { useAuth } from './AuthContext'
+import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { normalizeForMatch } from '../lib/normalize'
+import type { Keyword } from '../types'
+
+type KeywordsContextValue = {
+  keywords: Keyword[]
+  loading: boolean
+  refresh: () => Promise<void>
+  addKeyword: (phrase: string) => Promise<{ id?: string; error?: string }>
+  deleteKeyword: (id: string) => Promise<{ error?: string }>
+}
+
+const KeywordsContext = createContext<KeywordsContextValue | null>(null)
+
+function isAiPending(k: Keyword) {
+  return !(k.search_terms && k.search_terms.length > 0)
+}
+
+export function KeywordsProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
+  const [keywords, setKeywords] = useState<Keyword[]>([])
+  const [loading, setLoading] = useState(false)
+
+  const refresh = useCallback(async () => {
+    if (!user || !isSupabaseConfigured) {
+      setKeywords([])
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('keywords')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: true })
+    if (!error) setKeywords((data as Keyword[]) ?? [])
+    else setKeywords([])
+    setLoading(false)
+  }, [user])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  // Poll faster while AI expand is pending
+  useEffect(() => {
+    if (!user || !keywords.some(isAiPending)) return
+    const id = window.setInterval(() => void refresh(), 3_000)
+    return () => window.clearInterval(id)
+  }, [user, keywords, refresh])
+
+  const addKeyword = useCallback(
+    async (phrase: string) => {
+      if (!user || !isSupabaseConfigured) return { error: '请先登录' }
+      const trimmed = phrase.trim()
+      if (!trimmed) return { error: '请输入关键词' }
+      const { data, error } = await supabase
+        .from('keywords')
+        .insert({
+          user_id: user.id,
+          phrase: trimmed,
+          normalized_phrase: normalizeForMatch(trimmed),
+          search_terms: [],
+          ai_note: '',
+        })
+        .select('id')
+        .maybeSingle()
+      if (error) return { error: error.message }
+      const id = data?.id as string | undefined
+      if (id) {
+        // Await expand only (~几秒); crawl is kicked off in the background by the function
+        const { error: fnErr } = await supabase.functions.invoke('expand-keyword', {
+          body: { keyword_id: id, trigger_crawl: true, force: true },
+        })
+        if (fnErr) {
+          console.warn('expand-keyword failed', fnErr)
+        }
+      }
+      await refresh()
+      return { id }
+    },
+    [user, refresh],
+  )
+
+  const deleteKeyword = useCallback(
+    async (id: string) => {
+      if (!user || !isSupabaseConfigured) return { error: '请先登录' }
+      const { error } = await supabase.from('keywords').delete().eq('id', id)
+      if (error) return { error: error.message }
+      await refresh()
+      return {}
+    },
+    [user, refresh],
+  )
+
+  const value = useMemo(
+    () => ({ keywords, loading, refresh, addKeyword, deleteKeyword }),
+    [keywords, loading, refresh, addKeyword, deleteKeyword],
+  )
+
+  return <KeywordsContext.Provider value={value}>{children}</KeywordsContext.Provider>
+}
+
+export function useKeywords() {
+  const ctx = useContext(KeywordsContext)
+  if (!ctx) throw new Error('useKeywords must be used within KeywordsProvider')
+  return ctx
+}
+
+export function keywordAiReady(k: Keyword) {
+  const terms = k.search_terms || []
+  const groups = k.match_groups || []
+  if (terms.length > 0) return true
+  if (Array.isArray(groups) && groups.some((g) => Array.isArray(g) && g.length > 0)) return true
+  return false
+}
