@@ -14,7 +14,7 @@ from supabase import Client, create_client
 
 from normalize import normalize_for_match
 from relevance import filter_matches_with_relevance, stage1_match
-from jobs import ensure_translate_jobs, mark_jobs
+from jobs import ensure_jobs, ensure_translate_jobs, mark_jobs
 from sources import FEED_SOURCES
 
 
@@ -199,6 +199,16 @@ def cleanup_orphan_articles(sb: Client, keep_ids: set[str] | None = None) -> int
 
 def crawl() -> None:
     sb = get_supabase()
+    user_keywords = load_user_keywords(sb)
+    print(f"Users with keywords: {len(user_keywords)}")
+    ensure_jobs(
+        sb,
+        user_ids=list(user_keywords.keys()),
+        step="crawl",
+        status="running",
+        title="抓取并匹配新闻",
+        detail="正在抓取 RSS 并匹配关键词…",
+    )
     mark_jobs(
         sb,
         step="crawl",
@@ -206,8 +216,6 @@ def crawl() -> None:
         detail="正在抓取 RSS 并匹配关键词…",
         from_statuses=["queued", "running"],
     )
-    user_keywords = load_user_keywords(sb)
-    print(f"Users with keywords: {len(user_keywords)}")
 
     candidates: list[dict[str, Any]] = []
     preview_articles: list[dict[str, Any]] = []

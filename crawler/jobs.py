@@ -37,15 +37,23 @@ def mark_jobs(
         print(f"user_jobs update skipped ({step}/{status}): {exc}")
 
 
-def ensure_translate_jobs(sb: Any, user_ids: list[str], detail: str) -> None:
+def ensure_jobs(
+    sb: Any,
+    *,
+    user_ids: list[str],
+    step: str,
+    status: str,
+    title: str,
+    detail: str = "",
+) -> None:
     if not user_ids:
         return
     rows = [
         {
             "user_id": uid,
-            "step": "translate",
-            "status": "running",
-            "title": "翻译匹配新闻",
+            "step": step,
+            "status": status,
+            "title": title,
             "detail": detail,
             "updated_at": _now(),
         }
@@ -54,4 +62,15 @@ def ensure_translate_jobs(sb: Any, user_ids: list[str], detail: str) -> None:
     try:
         sb.table("user_jobs").insert(rows).execute()
     except Exception as exc:  # noqa: BLE001
-        print(f"user_jobs translate insert skipped: {exc}")
+        print(f"user_jobs insert skipped ({step}): {exc}")
+
+
+def ensure_translate_jobs(sb: Any, user_ids: list[str], detail: str) -> None:
+    ensure_jobs(
+        sb,
+        user_ids=user_ids,
+        step="translate",
+        status="running",
+        title="翻译匹配新闻",
+        detail=detail,
+    )
