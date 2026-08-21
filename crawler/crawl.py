@@ -12,7 +12,8 @@ import feedparser
 import httpx
 from supabase import Client, create_client
 
-from normalize import expand_match_terms, matches_keyword, normalize_for_match
+from normalize import normalize_for_match
+from relevance import filter_matches_with_relevance, stage1_match
 from sources import FEED_SOURCES
 
 
@@ -88,42 +89,41 @@ def entry_to_article(source_name: str, entry: dict[str, Any]) -> dict[str, Any] 
     }
 
 
-def load_user_terms(sb: Client) -> dict[str, list[str]]:
-    """Map user_id -> deduped match terms from that user's keywords only."""
-    result = sb.table("keywords").select("user_id, phrase, search_terms").limit(2000).execute()
-    by_user: dict[str, list[str]] = {}
-    seen_by_user: dict[str, set[str]] = {}
-
+def load_user_keywords(sb: Client) -> dict[str, list[dict[str, Any]]]:
+    """Map user_id -> that user's keyword rows (for per-keyword strict/loose match)."""
+    try:
+        result = (
+            sb.table("keywords")
+            .select("id, user_id, phrase, search_terms, match_groups, match_mode")
+            .limit(2000)
+            .execute()
+        )
+    except Exception:  # noqa: BLE001
+        result = (
+            sb.table("keywords")
+            .select("id, user_id, phrase, search_terms")
+            .limit(2000)
+            .execute()
+        )
+    by_user: dict[str, list[dict[str, Any]]] = {}
     for row in result.data or []:
         uid = row.get("user_id")
         if not uid:
             continue
-        terms = expand_match_terms(row.get("phrase") or "", row.get("search_terms") or [])
-        bucket = by_user.setdefault(uid, [])
-        seen = seen_by_user.setdefault(uid, set())
-        for term in terms:
-            key = normalize_for_match(term)
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            bucket.append(term)
-    return {uid: terms for uid, terms in by_user.items() if terms}
+        by_user.setdefault(uid, []).append(row)
+    return {uid: rows for uid, rows in by_user.items() if rows}
 
 
-def article_matches(article: dict[str, Any], terms: list[str]) -> bool:
-    if not terms:
-        return False
-    hay = f"{article.get('title', '')} {article.get('summary', '')}"
-    # Prefer pre-normalized text when present, but still enforce word boundaries.
-    normalized = article.get("raw_text_normalized") or normalize_for_match(hay)
-    for term in terms:
-        if matches_keyword(normalized, term) or matches_keyword(hay, term):
-            return True
-    return False
-
-
-def matching_user_ids(article: dict[str, Any], user_terms: dict[str, list[str]]) -> list[str]:
-    return [uid for uid, terms in user_terms.items() if article_matches(article, terms)]
+def matching_keyword_rows(
+    article: dict[str, Any], user_keywords: dict[str, list[dict[str, Any]]]
+) -> list[tuple[str, dict[str, Any]]]:
+    """Stage-1 recall: (user_id, keyword_row) pairs."""
+    out: list[tuple[str, dict[str, Any]]] = []
+    for uid, rows in user_keywords.items():
+        for row in rows:
+            if stage1_match(article, row):
+                out.append((uid, row))
+    return out
 
 
 def upsert_articles(sb: Client, articles: list[dict[str, Any]]) -> int:
@@ -198,14 +198,15 @@ def cleanup_orphan_articles(sb: Client, keep_ids: set[str] | None = None) -> int
 
 def crawl() -> None:
     sb = get_supabase()
-    user_terms = load_user_terms(sb)
-    print(f"Users with keywords: {len(user_terms)}")
+    user_keywords = load_user_keywords(sb)
+    print(f"Users with keywords: {len(user_keywords)}")
 
     candidates: list[dict[str, Any]] = []
     preview_articles: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
     scanned = 0
-    url_users: dict[str, list[str]] = {}
+    # url -> stage-1 (user_id, keyword_row) pairs
+    url_kw_hits: dict[str, list[tuple[str, dict[str, Any]]]] = {}
 
     for source in FEED_SOURCES:
         try:
@@ -229,15 +230,15 @@ def crawl() -> None:
             if source.name in PREVIEW_SOURCE_NAMES:
                 preview_articles.append(article)
 
-            if not user_terms:
+            if not user_keywords:
                 continue
-            users = matching_user_ids(article, user_terms)
-            if not users:
+            kw_hits = matching_keyword_rows(article, user_keywords)
+            if not kw_hits:
                 continue
             candidates.append(article)
-            url_users[url] = users
+            url_kw_hits[url] = kw_hits
 
-    if not user_terms:
+    if not user_keywords:
         print("No keywords (or AI terms) yet — keeping guest preview pool only.")
 
     # Public movie/culture pool for guests (dedupe against keyword matches).
@@ -252,15 +253,30 @@ def crawl() -> None:
         sb, [a["url"] for a in candidates] + [a["url"] for a in preview_only]
     )
 
-    hits: list[dict[str, str]] = []
+    stage1_matches: list[dict[str, Any]] = []
     for article in candidates:
         url = article["url"]
         aid = id_by_url.get(url)
         if not aid:
             continue
-        for uid in url_users.get(url, []):
-            hits.append({"user_id": uid, "article_id": aid})
+        for uid, row in url_kw_hits.get(url, []):
+            kid = row.get("id")
+            if not kid:
+                continue
+            stage1_matches.append(
+                {
+                    "user_id": uid,
+                    "keyword_id": kid,
+                    "keyword_phrase": row.get("phrase") or "",
+                    "match_mode": row.get("match_mode") or "",
+                    "match_groups": row.get("match_groups"),
+                    "article_id": aid,
+                    "title": article.get("title") or "",
+                    "summary": article.get("summary") or "",
+                }
+            )
 
+    hits = filter_matches_with_relevance(sb, matches=stage1_matches)
     inserted, deleted_hits = replace_hits(sb, hits)
     preview_ids = {id_by_url[u] for u in (a["url"] for a in preview_only) if u in id_by_url}
     removed = cleanup_orphan_articles(sb, preview_ids)

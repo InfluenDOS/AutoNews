@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 # Digraphs must be processed before single letters
 LATIN_TO_CYRILLIC = [
     ("dž", "џ"),
@@ -206,6 +208,11 @@ _SR_SUFFIXES = (
 _FALSE_FRIEND_HITS = {
     "premijer": frozenset({"premijera"}),
     "premijerka": frozenset({"premijera"}),
+    # izbor = "choice/selection"; izbori / izbore / … = "elections"
+    "izbori": frozenset({"izbor"}),
+    "izbore": frozenset({"izbor"}),
+    "izborima": frozenset({"izbor"}),
+    "izborite": frozenset({"izbor"}),
 }
 
 
@@ -433,8 +440,87 @@ def expand_match_terms(phrase: str, search_terms: list[str] | None = None) -> li
     return out
 
 
-def article_matches_groups(haystack: str, terms: list[str]) -> bool:
+def clean_match_groups(raw: Any) -> list[list[str]]:
+    """Normalize AI/DB match_groups into [[variant, …], …]."""
+    if not isinstance(raw, list):
+        return []
+    groups: list[list[str]] = []
+    for g in raw:
+        if not isinstance(g, list):
+            continue
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for item in g:
+            s = str(item).strip()
+            if not s:
+                continue
+            key = normalize_for_match(s)
+            if not key or key in seen or key.isdigit() or key in MATCH_STOPWORDS:
+                continue
+            if " " not in s and key in BROAD_SINGLE_TERMS:
+                continue
+            seen.add(key)
+            cleaned.append(s[:80])
+        if cleaned:
+            groups.append(cleaned[:12])
+    return groups[:6]
+
+
+def suggest_match_mode(phrase: str) -> str:
+    """Long Chinese / long intents → strict (AND groups); short topics → loose."""
+    p = (phrase or "").strip()
+    cjk = sum(1 for ch in p if "\u4e00" <= ch <= "\u9fff")
+    if cjk >= 8 or len(p) >= 24:
+        return "strict"
+    return "loose"
+
+
+def haystack_for_article(article: dict[str, Any]) -> tuple[str, str]:
+    hay = f"{article.get('title', '')} {article.get('summary', '')}"
+    normalized = article.get("raw_text_normalized") or normalize_for_match(hay)
+    return hay, normalized
+
+
+def phrase_hits(hay: str, normalized: str, phrase: str) -> bool:
+    return matches_keyword(normalized, phrase) or matches_keyword(hay, phrase)
+
+
+def article_matches_loose(article: dict[str, Any], terms: list[str]) -> bool:
     """OR across precise terms (inflection-aware)."""
+    if not terms:
+        return False
+    hay, normalized = haystack_for_article(article)
+    return any(phrase_hits(hay, normalized, term) for term in terms)
+
+
+def article_matches_strict(article: dict[str, Any], groups: list[list[str]]) -> bool:
+    """AND across groups; OR within each group (language variants)."""
+    if not groups:
+        return False
+    hay, normalized = haystack_for_article(article)
+    for group in groups:
+        if not group:
+            return False
+        if not any(phrase_hits(hay, normalized, alt) for alt in group):
+            return False
+    return True
+
+
+def article_matches_keyword_row(article: dict[str, Any], row: dict[str, Any]) -> bool:
+    """Match one user keyword using strict groups or loose terms."""
+    mode = (row.get("match_mode") or "").strip() or suggest_match_mode(row.get("phrase") or "")
+    groups = clean_match_groups(row.get("match_groups"))
+    if mode == "strict" and groups:
+        return article_matches_strict(article, groups)
+    terms = expand_match_terms(row.get("phrase") or "", row.get("search_terms") or [])
+    # If AI returned groups but mode loose, still allow OR of flattened variants
+    if not terms and groups:
+        terms = [alt for g in groups for alt in g]
+    return article_matches_loose(article, terms)
+
+
+# Backward-compatible alias
+def article_matches_groups(haystack: str, terms: list[str]) -> bool:
     if not terms:
         return False
     return any(matches_keyword(haystack, term) for term in terms)

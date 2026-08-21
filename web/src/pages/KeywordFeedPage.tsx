@@ -3,7 +3,7 @@ import { Navigate, useParams } from 'react-router-dom'
 import { ArticleCard } from '../components/ArticleCard'
 import { useAuth } from '../context/AuthContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
-import { articleMatchesKeywords, keywordMatchTerms } from '../lib/normalize'
+import { articleMatchesKeyword } from '../lib/normalize'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Article, Keyword } from '../types'
 
@@ -52,7 +52,7 @@ function AiProgressPanel({
         </li>
       </ol>
       <p className="muted ai-progress-hint">
-        通常由定时任务完成扩展与抓取，约数分钟。本页会自动刷新。
+        通常由定时任务完成扩展与抓取（约每小时），本页会自动刷新。
       </p>
     </div>
   )
@@ -64,6 +64,7 @@ export function KeywordFeedPage({ all = false }: Props) {
   const { keywords, loading: kwLoading, refresh } = useKeywords()
   const [articles, setArticles] = useState<Article[]>([])
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set())
+  const [relevance, setRelevance] = useState<Map<string, boolean>>(new Map())
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
@@ -90,6 +91,7 @@ export function KeywordFeedPage({ all = false }: Props) {
     if (!isSupabaseConfigured || !user) {
       setArticles([])
       setStarredIds(new Set())
+      setRelevance(new Map())
       setLoading(false)
       return
     }
@@ -117,12 +119,29 @@ export function KeywordFeedPage({ all = false }: Props) {
       const tb = b.published_at ? Date.parse(b.published_at) : 0
       return tb - ta
     })
+    const sliced = list.slice(0, 200)
 
-    setArticles(list.slice(0, 200))
+    const kidList = keywords.map((k) => k.id).filter(Boolean)
+    const aidList = sliced.map((a) => a.id).filter(Boolean)
+    const relMap = new Map<string, boolean>()
+    if (kidList.length && aidList.length) {
+      const { data: relRows } = await supabase
+        .from('article_keyword_relevance')
+        .select('keyword_id, article_id, relevant')
+        .in('keyword_id', kidList)
+        .in('article_id', aidList)
+      for (const r of relRows ?? []) {
+        const row = r as { keyword_id: string; article_id: string; relevant: boolean }
+        relMap.set(`${row.keyword_id}:${row.article_id}`, Boolean(row.relevant))
+      }
+    }
+
+    setArticles(sliced)
+    setRelevance(relMap)
     setStarredIds(new Set((stars ?? []).map((s: { article_id: string }) => s.article_id)))
     setUpdatedAt(new Date())
     setLoading(false)
-  }, [user])
+  }, [user, keywords])
 
   useEffect(() => {
     void load()
@@ -143,16 +162,16 @@ export function KeywordFeedPage({ all = false }: Props) {
   const visible = useMemo(() => {
     if (readyKeywords.length === 0) return []
     return articles.filter((a) =>
-      readyKeywords.some((k) => articleMatchesKeywords(a, keywordMatchTerms(k))),
+      readyKeywords.some((k) => articleMatchesKeyword(a, k, relevance)),
     )
-  }, [articles, readyKeywords])
+  }, [articles, readyKeywords, relevance])
 
   const matchedFor = useCallback(
     (article: Article) =>
       readyKeywords
-        .filter((k) => articleMatchesKeywords(article, keywordMatchTerms(k)))
+        .filter((k) => articleMatchesKeyword(article, k, relevance))
         .map((k) => k.phrase),
-    [readyKeywords],
+    [readyKeywords, relevance],
   )
 
   const lastUpdatedLabel = useMemo(() => {

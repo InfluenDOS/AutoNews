@@ -108,5 +108,9 @@ export function useKeywords() {
 }
 
 export function keywordAiReady(k: Keyword) {
-  return Boolean(k.search_terms && k.search_terms.length > 0)
+  const terms = k.search_terms || []
+  const groups = k.match_groups || []
+  if (terms.length > 0) return true
+  if (Array.isArray(groups) && groups.some((g) => Array.isArray(g) && g.length > 0)) return true
+  return false
 }

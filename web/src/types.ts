@@ -19,6 +19,8 @@ export type Keyword = {
   phrase: string
   normalized_phrase: string
   search_terms?: string[]
+  match_groups?: string[][]
+  match_mode?: 'loose' | 'strict'
   ai_note?: string
   created_at: string
 }

@@ -7,19 +7,34 @@ import sys
 from typing import Any
 
 from ai_client import ai_configured, chat_json
-from normalize import normalize_for_match
 from crawl import get_supabase
+from normalize import (
+    clean_match_groups,
+    expand_match_terms,
+    normalize_for_match,
+    suggest_match_mode,
+)
 
 
-EXPAND_SYSTEM = """你是多语种新闻检索助手。用户用中文描述想关注的话题（可能较模糊）。
-请提取能在目标媒体标题/摘要中精准命中的检索短语（按话题常见原文语言给出，可含英文及其他当地语言写法）。
+EXPAND_SYSTEM = """你是多语种新闻检索助手。用户用中文描述想关注的话题。
+请把意图拆成「检索结构」，用于在巴尔干等外语媒体标题/摘要中命中。
 
-输出 JSON：{"search_terms":["..."],"ai_note":"..."}
+只输出 JSON：
+{
+  "match_mode": "strict" 或 "loose",
+  "match_groups": [["变体A","变体B"], ["变体C","变体D"]],
+  "search_terms": ["可选的完整短语…"],
+  "ai_note": "一句中文说明"
+}
 
-硬性规则：
-1. search_terms 给 4～10 个「短语」，尽量用多词短语，避免过宽单词语（如单独的 China、news、world、economy）。
-2. 短语要同时体现用户意图的核心要素，避免只命中其中一个要素的新闻。
-3. 可保留专名原文写法；ai_note 用一句中文说明理解；不要 Markdown。"""
+规则：
+1. 短话题（如「武契奇」「选举」）：match_mode=loose；match_groups 可空；search_terms 给 4～10 个多词短语，彼此为 OR。
+2. 长意图（含多个要素，如「中国籍非法移民在巴尔干的活动」）：match_mode=strict；
+   match_groups 给 2～4 组要素（每组是同义/多语变体）。召回阶段会放宽，再由第二阶段相关性复核过滤。
+   例如：[["kineski","kineskih","Chinese"],["migranti","ilegalni migranti"],["Balkan","Srbija","BiH"]]。
+3. 严禁把过宽单词语单独作为一整组（如单独的 China、migrant、Balkan、news）。
+4. 变体用目标媒体常见原文（塞/克/波、阿尔巴尼亚语、英语等）；ai_note 用中文；不要 Markdown。
+5. 多要素意图务必输出 match_mode=strict 且至少 2 组 match_groups。"""
 
 
 TRANSLATE_SYSTEM = """你是新华社/财新风格的国际新闻改写编辑。输入可能是外语（含塞尔维亚语拉丁/西里尔、英语等）的标题+摘要。
@@ -44,38 +59,75 @@ TRANSLATE_SYSTEM = """你是新华社/财新风格的国际新闻改写编辑。
 
 
 def expand_keyword_phrase(phrase: str) -> dict[str, Any]:
-    data = chat_json(EXPAND_SYSTEM, f"用户输入：{phrase}")
-    terms = data.get("search_terms") or []
-    if not isinstance(terms, list):
-        terms = []
-    cleaned = []
-    seen: set[str] = set()
-    for t in terms:
-        s = str(t).strip()
-        if not s:
-            continue
-        key = normalize_for_match(s)
-        if key in seen:
-            continue
-        seen.add(key)
-        cleaned.append(s[:80])
+    suggested = suggest_match_mode(phrase)
+    data = chat_json(
+        EXPAND_SYSTEM,
+        f"用户输入：{phrase}\n（系统建议 match_mode={suggested}，长意图请用 strict+match_groups）",
+    )
+
+    groups = clean_match_groups(data.get("match_groups"))
+    terms_raw = data.get("search_terms") or []
+    if not isinstance(terms_raw, list):
+        terms_raw = []
+    terms = expand_match_terms(phrase, [str(t) for t in terms_raw])
+
+    ai_mode = str(data.get("match_mode") or "").strip()
+    want_strict = (ai_mode == "strict" or suggested == "strict") and len(groups) >= 2
+    if want_strict:
+        mode = "strict"
+        flat: list[str] = []
+        seen: set[str] = set()
+        for g in groups:
+            for alt in g:
+                key = normalize_for_match(alt)
+                if key and key not in seen:
+                    seen.add(key)
+                    flat.append(alt)
+        terms = flat[:16] or terms
+    else:
+        mode = "loose"
+        groups = []
+        if not terms:
+            terms = [phrase]
+
     note = str(data.get("ai_note") or "").strip()[:300]
-    return {"search_terms": cleaned[:12], "ai_note": note}
+    return {
+        "match_mode": mode,
+        "match_groups": groups,
+        "search_terms": terms[:12],
+        "ai_note": note,
+    }
+
+
+def _keyword_needs_expand(row: dict[str, Any], force: bool) -> bool:
+    if force:
+        return True
+    terms = row.get("search_terms") or []
+    groups = row.get("match_groups") or []
+    phrase = (row.get("phrase") or "").strip()
+    if not terms:
+        return True
+    # Re-expand long intents that never got structured groups
+    if suggest_match_mode(phrase) == "strict":
+        cleaned = clean_match_groups(groups)
+        if len(cleaned) < 2:
+            return True
+    return False
 
 
 def process_keywords(limit: int = 30, force: bool = False) -> int:
     sb = get_supabase()
-    result = (
-        sb.table("keywords")
-        .select("id, phrase, search_terms")
-        .limit(200)
-        .execute()
-    )
+    try:
+        result = (
+            sb.table("keywords")
+            .select("id, phrase, search_terms, match_groups, match_mode")
+            .limit(200)
+            .execute()
+        )
+    except Exception:  # noqa: BLE001
+        result = sb.table("keywords").select("id, phrase, search_terms").limit(200).execute()
     rows = result.data or []
-    if force:
-        pending = rows[:limit]
-    else:
-        pending = [r for r in rows if not (r.get("search_terms") or [])][:limit]
+    pending = [r for r in rows if _keyword_needs_expand(r, force)][:limit]
     print(f"Keywords pending AI expansion: {len(pending)}")
     done = 0
     for row in pending:
@@ -84,19 +136,26 @@ def process_keywords(limit: int = 30, force: bool = False) -> int:
             continue
         try:
             expanded = expand_keyword_phrase(phrase)
-            terms = expanded["search_terms"]
-            if not terms:
-                terms = [phrase]
+            terms = expanded["search_terms"] or [phrase]
+            groups = expanded["match_groups"]
+            mode = expanded["match_mode"]
             normalized = " ".join(normalize_for_match(t) for t in terms)
-            sb.table("keywords").update(
-                {
-                    "search_terms": terms,
-                    "ai_note": expanded.get("ai_note") or "",
-                    "normalized_phrase": normalized[:2000] or normalize_for_match(phrase),
-                }
-            ).eq("id", row["id"]).execute()
+            payload = {
+                "search_terms": terms,
+                "ai_note": expanded.get("ai_note") or "",
+                "normalized_phrase": normalized[:2000] or normalize_for_match(phrase),
+                "match_groups": groups,
+                "match_mode": mode,
+            }
+            try:
+                sb.table("keywords").update(payload).eq("id", row["id"]).execute()
+            except Exception:  # noqa: BLE001
+                # Pre-migration DB without match_* columns
+                payload.pop("match_groups", None)
+                payload.pop("match_mode", None)
+                sb.table("keywords").update(payload).eq("id", row["id"]).execute()
             done += 1
-            print(f"  expanded: {phrase!r} -> {terms}")
+            print(f"  expanded: {phrase!r} mode={mode} groups={groups} terms={terms}")
         except Exception as exc:  # noqa: BLE001
             print(f"  FAILED keyword {row.get('id')}: {exc}", file=sys.stderr)
     return done
@@ -179,7 +238,6 @@ def translate_articles(limit: int = 40, force: bool = False) -> int:
                 payload["lead_zh"] = out["lead_zh"]
                 payload["body_zh"] = out["body_zh"]
             else:
-                # Fallback: pack lead+body into summary_zh for older schema
                 payload["summary_zh"] = "\n\n".join(
                     x for x in [out["lead_zh"], out["body_zh"]] if x
                 )[:4000]
