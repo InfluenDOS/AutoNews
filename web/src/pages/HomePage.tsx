@@ -14,7 +14,9 @@ export function HomePage() {
   const [keywords, setKeywords] = useState<Keyword[]>([])
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [crawling, setCrawling] = useState(false)
 
   const load = useCallback(async () => {
     if (!isSupabaseConfigured) {
@@ -61,13 +63,35 @@ export function HomePage() {
     [keywords],
   )
 
-  // Only show articles matching the logged-in user's keywords.
-  // Guests see the keyword-matched pool (already filtered at crawl time).
   const visible = useMemo(() => {
     if (!user) return articles
     if (phrases.length === 0) return []
     return articles.filter((a) => articleMatchesKeywords(a, phrases))
   }, [articles, phrases, user])
+
+  async function triggerCrawl() {
+    if (!user) return
+    setCrawling(true)
+    setError(null)
+    setInfo(null)
+    const { data, error: err } = await supabase.rpc('enqueue_crawl')
+    if (err) {
+      setError(err.message)
+      setCrawling(false)
+      return
+    }
+    const msg =
+      (data as { message?: string } | null)?.message ||
+      '已触发抓取，请约 1～3 分钟后点刷新'
+    setInfo(msg)
+    // Auto-refresh a few times while Actions runs
+    window.setTimeout(() => void load(), 45_000)
+    window.setTimeout(() => void load(), 90_000)
+    window.setTimeout(() => {
+      void load()
+      setCrawling(false)
+    }, 150_000)
+  }
 
   async function toggleStar(articleId: string) {
     if (!user) return
@@ -121,11 +145,21 @@ export function HomePage() {
           </p>
         </div>
         <div className="feed-controls">
+          {user && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={crawling}
+              onClick={() => void triggerCrawl()}
+            >
+              {crawling ? '抓取中…' : '手动抓取'}
+            </button>
+          )}
           <button type="button" className="btn btn-sm btn-ghost" onClick={() => void load()}>
             刷新
           </button>
           {user && (
-            <Link className="btn btn-sm" to="/keywords">
+            <Link className="btn btn-sm btn-ghost" to="/keywords">
               管理关键词
             </Link>
           )}
@@ -133,6 +167,7 @@ export function HomePage() {
       </div>
 
       {error && <p className="error">{error}</p>}
+      {info && <p className="ok">{info}</p>}
       {loading ? (
         <p className="muted">正在加载新闻…</p>
       ) : visible.length === 0 ? (
@@ -148,7 +183,7 @@ export function HomePage() {
             <>
               <p>暂时没有匹配的新闻。</p>
               <p className="muted">
-                当前 RSS 中没有命中你关键词的报道。系统只会入库相关新闻；可稍后再刷新，或换一个更宽的关键词。
+                当前 RSS 中没有命中你关键词的报道。可点「手动抓取」立刻跑一轮，或换更宽的关键词。
               </p>
             </>
           )}
