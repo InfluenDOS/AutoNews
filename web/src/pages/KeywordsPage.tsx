@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { requestCrawl } from '../lib/crawl'
 import { normalizeForMatch } from '../lib/normalize'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Keyword } from '../types'
+
+const PENDING_POLL_MS = 8_000
+
+function isKeywordPending(k: Keyword): boolean {
+  return !(k.search_terms || []).length
+}
 
 export function KeywordsPage() {
   const { user } = useAuth()
@@ -14,35 +20,51 @@ export function KeywordsPage() {
   const [info, setInfo] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const hadPendingRef = useRef(false)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!user || !isSupabaseConfigured) {
       setLoading(false)
       return
     }
-    setLoading(true)
+    if (!opts?.quiet) setLoading(true)
     const { data, error: err } = await supabase
       .from('keywords')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
     if (err) setError(err.message)
-    else setKeywords((data as Keyword[]) ?? [])
-    setLoading(false)
+    else {
+      const rows = (data as Keyword[]) ?? []
+      const pending = rows.some(isKeywordPending)
+      if (hadPendingRef.current && !pending && rows.length > 0) {
+        setInfo('AI 已提炼检索词，可回首页查看匹配新闻')
+      }
+      hadPendingRef.current = pending
+      setKeywords(rows)
+    }
+    if (!opts?.quiet) setLoading(false)
   }, [user])
 
   useEffect(() => {
     void load()
   }, [load])
 
+  // While any keyword awaits AI expansion, poll so the page updates without a manual refresh.
+  useEffect(() => {
+    if (!user || !keywords.some(isKeywordPending)) return
+    const id = window.setInterval(() => void load({ quiet: true }), PENDING_POLL_MS)
+    return () => window.clearInterval(id)
+  }, [user, keywords, load])
+
   async function triggerCrawlAfterKeywordChange() {
     const result = await requestCrawl()
     if (result.ok) {
-      setInfo('已触发抓取：AI 提炼检索词后会拉取匹配新闻，约 1～3 分钟后可在首页查看')
+      setInfo('已触发抓取：AI 正在提炼检索词（约 1～3 分钟），本页会自动更新')
       return
     }
     if (result.kind === 'rate_limit') {
-      setInfo('关键词已保存。抓取冷却中（约 2 分钟），稍后会自动跑定时任务，也可回首页手动抓取')
+      setInfo('关键词已保存。抓取冷却中（约 2 分钟），本页会自动检查；也可回首页手动抓取')
       return
     }
     // Keyword save succeeded; crawl trigger failure should not look like a keyword error
@@ -144,7 +166,7 @@ export function KeywordsPage() {
                   {ready ? (
                     <p className="kw-terms">检索词：{terms.join(' · ')}</p>
                   ) : (
-                    <p className="kw-pending">等待 AI 处理（已触发抓取或等定时任务）</p>
+                    <p className="kw-pending">AI 提炼中…约 1～3 分钟，本页会自动刷新</p>
                   )}
                 </div>
                 <button

@@ -64,19 +64,36 @@ def expand_keyword_phrase(phrase: str) -> dict[str, Any]:
     return {"search_terms": cleaned[:12], "ai_note": note}
 
 
+def _is_pending_terms(search_terms: Any) -> bool:
+    if search_terms is None:
+        return True
+    if not isinstance(search_terms, list):
+        return True
+    return not any(str(t).strip() for t in search_terms)
+
+
 def process_keywords(limit: int = 30, force: bool = False) -> int:
     sb = get_supabase()
-    result = (
-        sb.table("keywords")
-        .select("id, phrase, search_terms")
-        .limit(200)
-        .execute()
-    )
-    rows = result.data or []
+    # Prefer DB-side filter for empty arrays so we don't miss pending rows past limit(200).
     if force:
-        pending = rows[:limit]
+        result = (
+            sb.table("keywords")
+            .select("id, phrase, search_terms")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        pending = result.data or []
     else:
-        pending = [r for r in rows if not (r.get("search_terms") or [])][:limit]
+        result = (
+            sb.table("keywords")
+            .select("id, phrase, search_terms")
+            .or_("search_terms.is.null,search_terms.eq.{}")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        pending = [r for r in (result.data or []) if _is_pending_terms(r.get("search_terms"))]
     print(f"Keywords pending AI expansion: {len(pending)}")
     done = 0
     for row in pending:
@@ -88,6 +105,8 @@ def process_keywords(limit: int = 30, force: bool = False) -> int:
             terms = expanded["search_terms"]
             if not terms:
                 terms = [phrase]
+            # Keep at least one usable term even if model returned only whitespace.
+            terms = [str(t).strip() for t in terms if str(t).strip()] or [phrase]
             normalized = " ".join(normalize_for_match(t) for t in terms)
             sb.table("keywords").update(
                 {
