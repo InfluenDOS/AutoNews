@@ -52,7 +52,7 @@ function AiProgressPanel({
         </li>
       </ol>
       <p className="muted ai-progress-hint">
-        通常由定时任务完成扩展与抓取（约每小时），本页会自动刷新。
+        通常几秒内完成扩展；本页会自动刷新。若稍慢，后台每 10 分钟也会补跑。
       </p>
     </div>
   )

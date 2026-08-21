@@ -52,10 +52,10 @@ export function KeywordsProvider({ children }: { children: ReactNode }) {
     void refresh()
   }, [refresh])
 
-  // Poll while any keyword waits for AI search_terms
+  // Poll faster while AI expand is pending
   useEffect(() => {
     if (!user || !keywords.some(isAiPending)) return
-    const id = window.setInterval(() => void refresh(), 8_000)
+    const id = window.setInterval(() => void refresh(), 3_000)
     return () => window.clearInterval(id)
   }, [user, keywords, refresh])
 
@@ -76,8 +76,18 @@ export function KeywordsProvider({ children }: { children: ReactNode }) {
         .select('id')
         .maybeSingle()
       if (error) return { error: error.message }
+      const id = data?.id as string | undefined
+      if (id) {
+        // Expand immediately via Edge Function (don't wait for hourly crawl)
+        void supabase.functions
+          .invoke('expand-keyword', { body: { keyword_id: id } })
+          .then(() => refresh())
+          .catch(() => {
+            /* backup: expand-keywords.yml every 10m */
+          })
+      }
       await refresh()
-      return { id: data?.id as string | undefined }
+      return { id }
     },
     [user, refresh],
   )
