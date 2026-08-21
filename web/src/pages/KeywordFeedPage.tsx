@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Navigate, useParams } from 'react-router-dom'
 import { ArticleCard } from '../components/ArticleCard'
 import { useAuth } from '../context/AuthContext'
+import { useJobs } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
 import { articleMatchesKeyword } from '../lib/normalize'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
@@ -62,12 +63,13 @@ export function KeywordFeedPage({ all = false }: Props) {
   const { keywordId } = useParams()
   const { user } = useAuth()
   const { keywords, loading: kwLoading, refresh } = useKeywords()
+  const { jobs, hasActive } = useJobs()
   const [articles, setArticles] = useState<Article[]>([])
+  const [hitMatchedAt, setHitMatchedAt] = useState<Map<string, number>>(new Map())
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set())
   const [relevance, setRelevance] = useState<Map<string, boolean>>(new Map())
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
 
   const keyword = useMemo(
     () => (all ? null : keywords.find((k) => k.id === keywordId) ?? null),
@@ -92,6 +94,7 @@ export function KeywordFeedPage({ all = false }: Props) {
       setArticles([])
       setStarredIds(new Set())
       setRelevance(new Map())
+      setHitMatchedAt(new Map())
       setLoading(false)
       return
     }
@@ -99,7 +102,10 @@ export function KeywordFeedPage({ all = false }: Props) {
 
     const [{ data: stars }, { data: hitRows, error: hitErr }] = await Promise.all([
       supabase.from('stars').select('article_id').eq('user_id', user.id),
-      supabase.from('article_hits').select('article_id, articles(*)').eq('user_id', user.id),
+      supabase
+        .from('article_hits')
+        .select('article_id, created_at, articles(*)')
+        .eq('user_id', user.id),
     ])
 
     if (hitErr) {
@@ -109,10 +115,19 @@ export function KeywordFeedPage({ all = false }: Props) {
     }
 
     const list: Article[] = []
+    const matchedAt = new Map<string, number>()
     for (const row of hitRows ?? []) {
-      const raw = (row as { articles?: Article | Article[] | null }).articles
+      const hit = row as {
+        article_id: string
+        created_at?: string
+        articles?: Article | Article[] | null
+      }
+      const raw = hit.articles
       const a = Array.isArray(raw) ? raw[0] : raw
-      if (a) list.push(a)
+      if (!a) continue
+      list.push(a)
+      const t = Date.parse(hit.created_at || '') || 0
+      if (t > 0) matchedAt.set(a.id, t)
     }
     list.sort((a, b) => {
       const ta = a.published_at ? Date.parse(a.published_at) : 0
@@ -137,9 +152,9 @@ export function KeywordFeedPage({ all = false }: Props) {
     }
 
     setArticles(sliced)
+    setHitMatchedAt(matchedAt)
     setRelevance(relMap)
     setStarredIds(new Set((stars ?? []).map((s: { article_id: string }) => s.article_id)))
-    setUpdatedAt(new Date())
     setLoading(false)
   }, [user, keywords])
 
@@ -149,15 +164,15 @@ export function KeywordFeedPage({ all = false }: Props) {
     return () => window.clearInterval(id)
   }, [load])
 
-  // Faster refresh while AI is pending
+  // Faster refresh while expand/crawl/translate is running
   useEffect(() => {
-    if (!aiPending) return
+    if (!aiPending && !hasActive) return
     const id = window.setInterval(() => {
       void refresh()
       void load()
-    }, 10_000)
+    }, 8_000)
     return () => window.clearInterval(id)
-  }, [aiPending, refresh, load])
+  }, [aiPending, hasActive, refresh, load])
 
   const visible = useMemo(() => {
     if (readyKeywords.length === 0) return []
@@ -176,13 +191,21 @@ export function KeywordFeedPage({ all = false }: Props) {
 
   const lastUpdatedLabel = useMemo(() => {
     let latest = 0
+    // Crawl/translate job completion = when pipeline produced results
+    for (const job of jobs) {
+      if (job.step !== 'crawl' && job.step !== 'translate') continue
+      if (job.status !== 'done') continue
+      const t = Date.parse(job.updated_at || job.created_at) || 0
+      if (t > latest) latest = t
+    }
+    // When this feed's hits were written by the crawler
     for (const a of visible) {
-      const t = Date.parse(a.published_at || a.created_at || '') || 0
+      const t = hitMatchedAt.get(a.id) || 0
       if (t > latest) latest = t
     }
     if (latest > 0) return formatUpdatedAt(latest)
-    return formatUpdatedAt(updatedAt)
-  }, [visible, updatedAt])
+    return null
+  }, [jobs, visible, hitMatchedAt])
 
   async function toggleStar(articleId: string) {
     if (!user) return
@@ -239,8 +262,8 @@ export function KeywordFeedPage({ all = false }: Props) {
             {loading || kwLoading
               ? '更新时间加载中…'
               : lastUpdatedLabel
-                ? `上次更新 ${lastUpdatedLabel}`
-                : '暂无更新时间'}
+                ? `上次抓取结果 ${lastUpdatedLabel}`
+                : '暂无抓取结果'}
           </p>
         </div>
         <div className="hero-window" aria-hidden="true" />
