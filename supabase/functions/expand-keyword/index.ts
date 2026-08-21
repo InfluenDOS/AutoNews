@@ -175,7 +175,7 @@ async function createJob(
 async function updateJob(
   admin: ReturnType<typeof createClient>,
   id: string | null,
-  patch: { status?: string; title?: string; detail?: string },
+  patch: { status?: string; title?: string; detail?: string; meta?: Record<string, unknown> },
 ): Promise<void> {
   if (!id) return
   await admin
@@ -384,6 +384,13 @@ Deno.serve(async (req) => {
         await updateJob(admin, expandJobId, {
           status: 'done',
           detail: `「${phrase}」扩展完成 · ${expandedPayload.match_mode} · ${expandedPayload.search_terms.length} 个检索词`,
+          meta: {
+            mode: expandedPayload.match_mode,
+            terms: expandedPayload.search_terms,
+            phrases: [phrase],
+            counts: { done: 1, total: 1 },
+            items: expandedPayload.match_groups.flat().slice(0, 12).map((t) => ({ title: t })),
+          },
         })
       }
     } catch (expandErr) {

@@ -17,17 +17,20 @@ def mark_jobs(
     status: str,
     detail: str = "",
     title: str | None = None,
+    meta: dict[str, Any] | None = None,
     from_statuses: list[str] | None = None,
 ) -> None:
     try:
-        q = sb.table("user_jobs").update(
-            {
-                "status": status,
-                "detail": detail,
-                "updated_at": _now(),
-                **({"title": title} if title else {}),
-            }
-        ).eq("step", step)
+        payload: dict[str, Any] = {
+            "status": status,
+            "detail": detail,
+            "updated_at": _now(),
+        }
+        if title:
+            payload["title"] = title
+        if meta is not None:
+            payload["meta"] = meta
+        q = sb.table("user_jobs").update(payload).eq("step", step)
         if from_statuses:
             q = q.in_("status", from_statuses)
         else:

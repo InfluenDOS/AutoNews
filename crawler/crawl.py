@@ -289,14 +289,25 @@ def crawl() -> None:
     inserted, deleted_hits = replace_hits(sb, hits)
     preview_ids = {id_by_url[u] for u in (a["url"] for a in preview_only) if u in id_by_url}
     removed = cleanup_orphan_articles(sb, preview_ids)
-    mark_jobs(
-        sb,
-        step="crawl",
-        status="done",
-        detail=f"完成 · 匹配 {len(candidates)} 篇 · hits {inserted}",
-        from_statuses=["queued", "running"],
-    )
-    # Per-user phrases that actually produced hits
+
+    # Sample matched article titles for the UI accordion
+    sample_items: list[dict[str, str]] = []
+    seen_aids: set[str] = set()
+    for m in stage1_matches:
+        aid = m.get("article_id")
+        if not aid or aid in seen_aids:
+            continue
+        seen_aids.add(str(aid))
+        sample_items.append(
+            {
+                "id": str(aid),
+                "title": (m.get("title") or "")[:120],
+                "keyword": (m.get("keyword_phrase") or "")[:80],
+            }
+        )
+        if len(sample_items) >= 15:
+            break
+
     phrases_by_user: dict[str, list[str]] = {}
     for m in stage1_matches:
         uid = m.get("user_id")
@@ -306,6 +317,23 @@ def crawl() -> None:
         bucket = phrases_by_user.setdefault(uid, [])
         if phrase and phrase not in bucket:
             bucket.append(phrase)
+
+    mark_jobs(
+        sb,
+        step="crawl",
+        status="done",
+        detail=f"完成 · 匹配 {len(candidates)} 篇 · hits {inserted}",
+        meta={
+            "counts": {
+                "matched": len(candidates),
+                "hits": inserted,
+                "scanned": scanned,
+            },
+            "items": sample_items,
+            "phrases": sorted({p for ps in phrases_by_user.values() for p in ps}),
+        },
+        from_statuses=["queued", "running"],
+    )
     hit_users = list({h["user_id"] for h in hits})
     if hit_users:
         ensure_translate_jobs(

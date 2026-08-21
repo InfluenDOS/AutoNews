@@ -21,7 +21,7 @@ type JobsContextValue = {
 
 const JobsContext = createContext<JobsContextValue | null>(null)
 
-const RECENT_DONE_MS = 20_000
+const RECENT_DONE_MS = 90_000
 
 export function JobsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()

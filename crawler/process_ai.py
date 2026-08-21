@@ -153,11 +153,17 @@ def process_keywords(limit: int = 30, force: bool = False) -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"  FAILED keyword {row.get('id')}: {exc}", file=sys.stderr)
     if pending:
+        phrases = [str(r.get("phrase") or "") for r in pending]
         mark_jobs(
             sb,
             step="expand",
             status="done" if done else "error",
-            detail=f"批量扩展完成 {done}/{len(pending)}",
+            detail=f"扩展完成 {done}/{len(pending)} · {phrase_label(phrases)}",
+            meta={
+                "counts": {"done": done, "total": len(pending)},
+                "phrases": [p for p in phrases if p],
+                "items": [{"title": p} for p in phrases if p][:12],
+            },
             from_statuses=["queued", "running"],
         )
     return done
@@ -241,6 +247,7 @@ def translate_articles(limit: int = 40, force: bool = False) -> int:
     )
 
     done = 0
+    items: list[dict[str, str]] = []
     for idx, row in enumerate(rows, start=1):
         try:
             out = translate_one(row)
@@ -260,6 +267,13 @@ def translate_articles(limit: int = 40, force: bool = False) -> int:
                 )[:4000]
             sb.table("articles").update(payload).eq("id", row["id"]).execute()
             done += 1
+            items.append(
+                {
+                    "id": str(row.get("id") or ""),
+                    "title": out["title_zh"],
+                    "summary": (out.get("summary_zh") or "")[:120],
+                }
+            )
             print(f"  [{idx}/{len(rows)}] {out['title_zh']}")
         except Exception as exc:  # noqa: BLE001
             print(f"  FAILED {row.get('id')}: {exc}", file=sys.stderr)
@@ -269,6 +283,10 @@ def translate_articles(limit: int = 40, force: bool = False) -> int:
         step="translate",
         status="done" if done else "error",
         detail=f"翻译完成 {done}/{len(rows)}",
+        meta={
+            "counts": {"done": done, "total": len(rows)},
+            "items": items[:20],
+        },
         from_statuses=["queued", "running"],
     )
     return done

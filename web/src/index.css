@@ -753,28 +753,44 @@ textarea {
   gap: 8px;
 }
 
+.process-banner-hint {
+  margin-left: auto;
+  color: var(--ink-dim);
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+
 .process-item {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  grid-template-areas:
-    'step title status'
-    'keyword keyword keyword'
-    'detail detail detail';
-  gap: 4px 10px;
-  padding: 8px 10px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.04);
   font-size: 0.88rem;
+  overflow: hidden;
+}
+
+.process-item-toggle {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 4px 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.process-item-toggle:disabled {
+  cursor: default;
 }
 
 .process-step {
-  grid-area: step;
   color: var(--accent);
   font-weight: 600;
 }
 
 .process-title {
-  grid-area: title;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -782,21 +798,94 @@ textarea {
 }
 
 .process-status {
-  grid-area: status;
   color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.process-chevron {
+  color: var(--ink-dim);
+  width: 1rem;
+  text-align: center;
+}
+
+.process-chevron.is-empty {
+  visibility: hidden;
+}
+
+.process-item-body {
+  padding: 0 10px 10px;
+  border-top: 1px solid var(--line-soft);
+  animation: process-in 0.2s ease both;
 }
 
 .process-keyword {
-  grid-area: keyword;
+  margin: 8px 0 0;
   color: var(--accent);
   font-size: 0.84rem;
   font-weight: 600;
 }
 
 .process-detail {
-  grid-area: detail;
+  margin: 6px 0 0;
   color: var(--ink-dim);
   font-size: 0.82rem;
+}
+
+.process-result-block {
+  margin-top: 10px;
+}
+
+.process-result-label {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  letter-spacing: 0.04em;
+}
+
+.process-result-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.process-result-list li {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.process-result-link {
+  display: grid;
+  gap: 2px;
+  color: inherit;
+}
+
+.process-result-link:hover .process-result-title {
+  color: var(--accent);
+}
+
+.process-result-title {
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.process-result-kw {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--ink-dim);
+}
+
+.process-result-summary {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--ink-dim);
+  line-height: 1.4;
+}
+
+.process-terms {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
 }
 
 .process-item.is-done .process-status {
