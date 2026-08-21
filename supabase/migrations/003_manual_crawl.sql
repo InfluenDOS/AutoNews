@@ -1,4 +1,5 @@
--- Manual crawl requests + optional GitHub dispatch via pg_net
+-- Manual crawl requests + GitHub Actions dispatch via pg_net
+-- (ASCII-only strings to avoid encoding issues in the SQL editor)
 
 create schema if not exists private;
 
@@ -37,7 +38,6 @@ create policy "crawl_requests_insert_own"
   to authenticated
   with check (auth.uid() = user_id);
 
--- Enable HTTP from database (Supabase)
 create extension if not exists pg_net with schema extensions;
 
 create or replace function public.enqueue_crawl()
@@ -56,7 +56,7 @@ declare
   url text;
 begin
   if uid is null then
-    raise exception '请先登录';
+    raise exception 'Please sign in first';
   end if;
 
   select count(*) into recent
@@ -65,11 +65,11 @@ begin
     and created_at > now() - interval '2 minutes';
 
   if recent > 0 then
-    raise exception '请稍等 2 分钟再手动抓取';
+    raise exception 'Please wait 2 minutes before crawling again';
   end if;
 
   insert into public.crawl_requests (user_id, status, message)
-  values (uid, 'queued', '已排队，正在触发抓取…')
+  values (uid, 'queued', 'queued')
   returning * into req;
 
   select value into token from private.app_secrets where key = 'github_token';
@@ -85,7 +85,7 @@ begin
   if token is null or length(trim(token)) < 10 then
     update public.crawl_requests
       set status = 'error',
-          message = '未配置 GitHub Token，无法触发抓取'
+          message = 'missing_github_token'
     where id = req.id
     returning * into req;
     return req;
@@ -110,7 +110,7 @@ begin
 
   update public.crawl_requests
     set status = 'triggered',
-        message = '已触发抓取任务，约 1～3 分钟后刷新查看'
+        message = 'triggered'
   where id = req.id
   returning * into req;
 

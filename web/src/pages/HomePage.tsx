@@ -76,14 +76,20 @@ export function HomePage() {
     setInfo(null)
     const { data, error: err } = await supabase.rpc('enqueue_crawl')
     if (err) {
-      setError(err.message)
+      const raw = err.message || ''
+      if (raw.includes('wait 2 minutes')) setError('请稍等 2 分钟再手动抓取')
+      else if (raw.includes('sign in')) setError('请先登录')
+      else setError(raw)
       setCrawling(false)
       return
     }
-    const msg =
-      (data as { message?: string } | null)?.message ||
-      '已触发抓取，请约 1～3 分钟后点刷新'
-    setInfo(msg)
+    const row = data as { status?: string; message?: string } | null
+    if (row?.status === 'error' || row?.message === 'missing_github_token') {
+      setError('手动抓取尚未配置完成，请稍后再试或联系管理员')
+      setCrawling(false)
+      return
+    }
+    setInfo('已触发抓取，约 1～3 分钟后点「刷新」查看')
     // Auto-refresh a few times while Actions runs
     window.setTimeout(() => void load(), 45_000)
     window.setTimeout(() => void load(), 90_000)
