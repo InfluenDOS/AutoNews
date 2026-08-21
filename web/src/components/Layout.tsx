@@ -179,7 +179,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <div
                 id="side-kw-children"
                 className="side-children-panel"
-                aria-hidden={!kwOpen}
+                aria-hidden={!kwOpen || collapsed}
+                hidden={collapsed}
               >
                 <div className="side-children">
                   {user &&
