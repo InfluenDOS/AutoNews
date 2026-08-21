@@ -179,25 +179,77 @@ MATCH_STOPWORDS = {
     "svet",
 }
 
+# Too broad alone — cause false positives (any migrant story, any China mention, etc.)
+BROAD_SINGLE_TERMS = {
+    "kina",
+    "kineski",
+    "kineska",
+    "kinesko",
+    "chinese",
+    "china",
+    "migranti",
+    "migrant",
+    "imigranti",
+    "imigrant",
+    "ilegalni",
+    "ilegalno",
+    "illegal",
+    "investicije",
+    "politika",
+    "ekonomija",
+    "diplomatija",
+    "trgovina",
+    "tehnologija",
+    "vojska",
+    "kultura",
+    "sport",
+}
+
 
 def expand_match_terms(phrase: str, search_terms: list[str] | None = None) -> list[str]:
-    """Build match terms from AI search_terms (preferred) or the raw phrase."""
+    """Build precise match terms. Prefer multi-word phrases; skip broad singles."""
     raw = [t.strip() for t in (search_terms or []) if str(t).strip()]
     base = raw if raw else ([phrase.strip()] if phrase and phrase.strip() else [])
     out: list[str] = []
     seen: set[str] = set()
+
+    def add(term: str) -> None:
+        key = normalize_for_match(term)
+        if not key or key in seen or key in MATCH_STOPWORDS:
+            return
+        # Reject broad single tokens
+        if " " not in term.strip() and key in BROAD_SINGLE_TERMS:
+            return
+        seen.add(key)
+        out.append(term.strip())
+
     for term in base:
-        parts = [term, *[w for w in term.replace(",", " ").split() if len(w) >= 4]]
-        for part in parts:
-            key = normalize_for_match(part)
-            if not key or key in seen or key in MATCH_STOPWORDS:
-                continue
-            seen.add(key)
-            out.append(part)
+        add(term)
+
+    # If AI only gave broad singles, keep the most specific multi-word-looking combos
+    # by pairing china-ish + migrant-ish when possible.
+    if not out and raw:
+        china = [t for t in raw if normalize_for_match(t) in {"kina", "kineski", "chinese", "china"} or "kines" in normalize_for_match(t)]
+        migr = [t for t in raw if any(x in normalize_for_match(t) for x in ("migr", "imigr", "ilegal"))]
+        for c in china[:2]:
+            for m in migr[:2]:
+                add(f"{c} {m}")
+
     if not out:
-        for term in base:
-            key = normalize_for_match(term)
-            if key and key not in seen:
-                seen.add(key)
-                out.append(term)
+        # Last resort: original user phrase (may be Chinese — then crawl will find nothing until AI expands well)
+        add(phrase)
+
     return out
+
+
+def article_matches_groups(haystack: str, terms: list[str]) -> bool:
+    """OR across precise terms."""
+    if not terms:
+        return False
+    for term in terms:
+        if matches_keyword(haystack, term):
+            return True
+        key = normalize_for_match(term)
+        if key and key in normalize_for_match(haystack):
+            return True
+    return False

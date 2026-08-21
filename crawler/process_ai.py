@@ -11,14 +11,16 @@ from normalize import normalize_for_match
 from crawl import get_supabase
 
 
-EXPAND_SYSTEM = """你是塞尔维亚新闻检索助手。用户会用中文描述想关注的话题（可能是模糊的一句话）。
-请提取适合在塞尔维亚主流媒体标题/摘要中检索的关键词。
+EXPAND_SYSTEM = """你是塞尔维亚新闻检索助手。用户用中文描述话题（可能较模糊）。
+请提取能在塞尔维亚媒体标题/摘要中精准命中的检索短语。
 
-要求：
-1. 输出 JSON：{"search_terms":["..."],"ai_note":"..."}
-2. search_terms：6～15 个词，必须包含短词与短语；重要专名给拉丁与西里尔写法。
-3. 不要单独使用过宽词（Srbija、Balkan、Beograd、vesti）。
-4. ai_note：一句中文说明理解；不要 Markdown。"""
+输出 JSON：{"search_terms":["..."],"ai_note":"..."}
+
+硬性规则：
+1. search_terms 只给 4～10 个「短语」，每个至少 2 个词（例如 kineski migranti、kineski ilegalci、kineski radnici Srbija）。
+2. 禁止单独输出过宽单词语：Kina、kineski、migranti、imigranti、ilegalni、Srbija、Balkan、Beograd、vesti。
+3. 短语要同时体现用户意图的核心要素（例如「中国籍」+「非法移民/移民」），避免只命中其中一个要素的新闻。
+4. 可含拉丁与西里尔专名写法；ai_note 用一句中文说明；不要 Markdown。"""
 
 
 TRANSLATE_SYSTEM = """你是新华社/财新风格的国际新闻改写编辑。输入可能是塞尔维亚语（拉丁或西里尔）或英语的耸动标题+摘要。
