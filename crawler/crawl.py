@@ -14,6 +14,7 @@ from supabase import Client, create_client
 
 from normalize import normalize_for_match
 from relevance import filter_matches_with_relevance, stage1_match
+from jobs import ensure_translate_jobs, mark_jobs
 from sources import FEED_SOURCES
 
 
@@ -198,6 +199,13 @@ def cleanup_orphan_articles(sb: Client, keep_ids: set[str] | None = None) -> int
 
 def crawl() -> None:
     sb = get_supabase()
+    mark_jobs(
+        sb,
+        step="crawl",
+        status="running",
+        detail="正在抓取 RSS 并匹配关键词…",
+        from_statuses=["queued", "running"],
+    )
     user_keywords = load_user_keywords(sb)
     print(f"Users with keywords: {len(user_keywords)}")
 
@@ -280,6 +288,16 @@ def crawl() -> None:
     inserted, deleted_hits = replace_hits(sb, hits)
     preview_ids = {id_by_url[u] for u in (a["url"] for a in preview_only) if u in id_by_url}
     removed = cleanup_orphan_articles(sb, preview_ids)
+    mark_jobs(
+        sb,
+        step="crawl",
+        status="done",
+        detail=f"完成 · 匹配 {len(candidates)} 篇 · hits {inserted}",
+        from_statuses=["queued", "running"],
+    )
+    hit_users = list({h["user_id"] for h in hits})
+    if hit_users:
+        ensure_translate_jobs(sb, hit_users, detail="等待翻译匹配新闻…")
     print(
         f"Scanned {scanned} · matched articles {len(candidates)} · preview kept {len(preview_only)} · "
         f"upserted {count} · hits {inserted} (replaced {deleted_hits}) · removed orphans {removed}"

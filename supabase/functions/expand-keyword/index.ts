@@ -141,14 +141,74 @@ function normalizeExpand(phrase: string, data: Record<string, unknown>): ExpandR
   }
 }
 
+async function createJob(
+  admin: ReturnType<typeof createClient>,
+  row: {
+    user_id: string
+    keyword_id?: string | null
+    step: 'expand' | 'crawl' | 'translate'
+    status: 'queued' | 'running' | 'done' | 'error'
+    title: string
+    detail?: string
+  },
+): Promise<string | null> {
+  const { data, error } = await admin
+    .from('user_jobs')
+    .insert({
+      user_id: row.user_id,
+      keyword_id: row.keyword_id ?? null,
+      step: row.step,
+      status: row.status,
+      title: row.title,
+      detail: row.detail ?? '',
+      updated_at: new Date().toISOString(),
+    })
+    .select('id')
+    .maybeSingle()
+  if (error) {
+    console.error('createJob', error.message)
+    return null
+  }
+  return data?.id ?? null
+}
+
+async function updateJob(
+  admin: ReturnType<typeof createClient>,
+  id: string | null,
+  patch: { status?: string; title?: string; detail?: string },
+): Promise<void> {
+  if (!id) return
+  await admin
+    .from('user_jobs')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', id)
+}
+
 async function maybeTriggerCrawl(
   admin: ReturnType<typeof createClient>,
   userId: string,
+  keywordId: string,
 ): Promise<{ triggered: boolean; reason?: string }> {
   const token = Deno.env.get('GITHUB_TOKEN')?.trim()
   const repo = (Deno.env.get('GITHUB_REPO') || 'InfluenDOS/AutoNews').trim()
   const workflow = (Deno.env.get('GITHUB_WORKFLOW') || 'crawl.yml').trim()
-  if (!token) return { triggered: false, reason: 'missing_github_token' }
+
+  const crawlJobId = await createJob(admin, {
+    user_id: userId,
+    keyword_id: keywordId,
+    step: 'crawl',
+    status: 'queued',
+    title: '抓取并匹配新闻',
+    detail: '等待触发 GitHub Actions…',
+  })
+
+  if (!token) {
+    await updateJob(admin, crawlJobId, {
+      status: 'error',
+      detail: '缺少 GITHUB_TOKEN，无法触发抓取',
+    })
+    return { triggered: false, reason: 'missing_github_token' }
+  }
 
   const cooldownSec = Number(Deno.env.get('CRAWL_COOLDOWN_SEC') || '90')
   const { data: cool } = await admin
@@ -160,6 +220,15 @@ async function maybeTriggerCrawl(
   if (cool?.last_triggered_at) {
     const elapsed = Date.now() - new Date(cool.last_triggered_at).getTime()
     if (elapsed < cooldownSec * 1000) {
+      await updateJob(admin, crawlJobId, {
+        status: 'running',
+        detail: '已有抓取在冷却/进行中，本次扩展会并入那一轮',
+      })
+      // Clear shortly so banner does not stick forever
+      await updateJob(admin, crawlJobId, {
+        status: 'done',
+        detail: '并入近期抓取任务',
+      })
       return { triggered: false, reason: 'cooldown' }
     }
   }
@@ -178,6 +247,10 @@ async function maybeTriggerCrawl(
 
   if (!resp.ok) {
     const text = await resp.text()
+    await updateJob(admin, crawlJobId, {
+      status: 'error',
+      detail: `触发失败 HTTP ${resp.status}`,
+    })
     return { triggered: false, reason: `github_${resp.status}:${text.slice(0, 120)}` }
   }
 
@@ -185,6 +258,11 @@ async function maybeTriggerCrawl(
     id: 1,
     last_triggered_at: new Date().toISOString(),
     last_by: userId,
+  })
+
+  await updateJob(admin, crawlJobId, {
+    status: 'running',
+    detail: 'Actions 已触发，正在抓取 RSS 与匹配…',
   })
 
   return { triggered: true }
@@ -254,51 +332,72 @@ Deno.serve(async (req) => {
       })
     }
 
+    const phrase = String(row.phrase || '').trim()
+    const expandJobId = await createJob(admin, {
+      user_id: user.id,
+      keyword_id: keywordId,
+      step: 'expand',
+      status: 'running',
+      title: `扩展「${phrase || '关键词'}」`,
+      detail: '正在生成多语言检索词…',
+    })
+
     const terms = (row.search_terms as string[] | null) || []
     const groups = cleanGroups(row.match_groups)
     let skipped = false
     let expandedPayload: ExpandResult | null = null
 
-    if (!force && (terms.length > 0 || groups.length >= 2)) {
-      skipped = true
-    } else {
-      const phrase = String(row.phrase || '').trim()
-      if (!phrase) {
-        return new Response(JSON.stringify({ error: 'empty phrase' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    try {
+      if (!force && (terms.length > 0 || groups.length >= 2)) {
+        skipped = true
+        await updateJob(admin, expandJobId, {
+          status: 'done',
+          detail: '已有检索词，跳过扩展',
+        })
+      } else {
+        if (!phrase) {
+          await updateJob(admin, expandJobId, { status: 'error', detail: '空关键词' })
+          return new Response(JSON.stringify({ error: 'empty phrase' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          })
+        }
+
+        const suggested = suggestMatchMode(phrase)
+        const raw = await chatJson(
+          EXPAND_SYSTEM,
+          `用户输入：${phrase}\n（系统建议 match_mode=${suggested}，长意图请用 strict+match_groups）`,
+        )
+        expandedPayload = normalizeExpand(phrase, raw)
+        const normalized = expandedPayload.search_terms.join(' ').slice(0, 2000) || phrase
+
+        const { error: updErr } = await admin
+          .from('keywords')
+          .update({
+            search_terms: expandedPayload.search_terms,
+            match_groups: expandedPayload.match_groups,
+            match_mode: expandedPayload.match_mode,
+            ai_note: expandedPayload.ai_note,
+            normalized_phrase: normalized,
+          })
+          .eq('id', keywordId)
+
+        if (updErr) throw updErr
+
+        await updateJob(admin, expandJobId, {
+          status: 'done',
+          detail: `完成 · ${expandedPayload.match_mode} · ${expandedPayload.search_terms.length} 个词`,
         })
       }
-
-      const suggested = suggestMatchMode(phrase)
-      const raw = await chatJson(
-        EXPAND_SYSTEM,
-        `用户输入：${phrase}\n（系统建议 match_mode=${suggested}，长意图请用 strict+match_groups）`,
-      )
-      expandedPayload = normalizeExpand(phrase, raw)
-      const normalized = expandedPayload.search_terms.join(' ').slice(0, 2000) || phrase
-
-      const { error: updErr } = await admin
-        .from('keywords')
-        .update({
-          search_terms: expandedPayload.search_terms,
-          match_groups: expandedPayload.match_groups,
-          match_mode: expandedPayload.match_mode,
-          ai_note: expandedPayload.ai_note,
-          normalized_phrase: normalized,
-        })
-        .eq('id', keywordId)
-
-      if (updErr) throw updErr
+    } catch (expandErr) {
+      const message = expandErr instanceof Error ? expandErr.message : String(expandErr)
+      await updateJob(admin, expandJobId, { status: 'error', detail: message.slice(0, 200) })
+      throw expandErr
     }
 
     let crawl: { triggered: boolean; reason?: string } = { triggered: false, reason: 'not_requested' }
     if (wantCrawl) {
-      // Don't block expand response on GitHub Actions dispatch
-      const crawlTask = maybeTriggerCrawl(admin, user.id).then((result) => {
-        crawl = result
-        return result
-      })
+      const crawlTask = maybeTriggerCrawl(admin, user.id, keywordId)
       const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } })
         .EdgeRuntime
       if (runtime?.waitUntil) {

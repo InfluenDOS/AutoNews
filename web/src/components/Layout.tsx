@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useJobs } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
 import { loadDailyPoem, type DailyPoem } from '../lib/dailyPoem'
+import { ProcessBanner } from './ProcessBanner'
 import {
   IconChevron,
   IconHash,
@@ -20,6 +22,7 @@ const KW_OPEN_KEY = 'autonews-kw-open-v2'
 export function Layout({ children }: { children: React.ReactNode }) {
   const { user, signOut, configured } = useAuth()
   const { keywords, addKeyword, deleteKeyword } = useKeywords()
+  const { refreshJobs } = useJobs()
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -105,7 +108,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
     if (!user || addBusy) return
     setAddError(null)
     setAddBusy(true)
+    void refreshJobs()
     const result = await addKeyword(draft)
+    await refreshJobs()
     setAddBusy(false)
     if (result.error) {
       setAddError(result.error)
@@ -340,6 +345,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {!configured && (
           <div className="banner warn">请先配置 Supabase 并完成数据库迁移。</div>
         )}
+
+        <ProcessBanner />
 
         <main className="main-stage">{children}</main>
 

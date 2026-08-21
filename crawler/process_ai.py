@@ -8,6 +8,7 @@ from typing import Any
 
 from ai_client import ai_configured, chat_json
 from crawl import get_supabase
+from jobs import mark_jobs
 from normalize import (
     clean_match_groups,
     expand_match_terms,
@@ -113,6 +114,15 @@ def process_keywords(limit: int = 30, force: bool = False) -> int:
     rows = result.data or []
     pending = [r for r in rows if _keyword_needs_expand(r, force)][:limit]
     print(f"Keywords pending AI expansion: {len(pending)}")
+    if pending:
+        mark_jobs(
+            sb,
+            step="expand",
+            status="running",
+            title="批量扩展关键词",
+            detail=f"待处理 {len(pending)} 个",
+            from_statuses=["queued", "running"],
+        )
     done = 0
     for row in pending:
         phrase = (row.get("phrase") or "").strip()
@@ -134,7 +144,6 @@ def process_keywords(limit: int = 30, force: bool = False) -> int:
             try:
                 sb.table("keywords").update(payload).eq("id", row["id"]).execute()
             except Exception:  # noqa: BLE001
-                # Pre-migration DB without match_* columns
                 payload.pop("match_groups", None)
                 payload.pop("match_mode", None)
                 sb.table("keywords").update(payload).eq("id", row["id"]).execute()
@@ -142,6 +151,14 @@ def process_keywords(limit: int = 30, force: bool = False) -> int:
             print(f"  expanded: {phrase!r} mode={mode} groups={groups} terms={terms}")
         except Exception as exc:  # noqa: BLE001
             print(f"  FAILED keyword {row.get('id')}: {exc}", file=sys.stderr)
+    if pending:
+        mark_jobs(
+            sb,
+            step="expand",
+            status="done" if done else "error",
+            detail=f"批量扩展完成 {done}/{len(pending)}",
+            from_statuses=["queued", "running"],
+        )
     return done
 
 
@@ -205,7 +222,22 @@ def translate_articles(limit: int = 40, force: bool = False) -> int:
     rows = rows[:limit]
     print(f"Articles pending Chinese rewrite: {len(rows)} (force={force}, body_col={with_body})")
     if not rows:
+        mark_jobs(
+            sb,
+            step="translate",
+            status="done",
+            detail="无需翻译",
+            from_statuses=["queued", "running"],
+        )
         return 0
+
+    mark_jobs(
+        sb,
+        step="translate",
+        status="running",
+        detail=f"正在翻译 {len(rows)} 篇…",
+        from_statuses=["queued", "running"],
+    )
 
     done = 0
     for idx, row in enumerate(rows, start=1):
@@ -230,6 +262,14 @@ def translate_articles(limit: int = 40, force: bool = False) -> int:
             print(f"  [{idx}/{len(rows)}] {out['title_zh']}")
         except Exception as exc:  # noqa: BLE001
             print(f"  FAILED {row.get('id')}: {exc}", file=sys.stderr)
+
+    mark_jobs(
+        sb,
+        step="translate",
+        status="done" if done else "error",
+        detail=f"翻译完成 {done}/{len(rows)}",
+        from_statuses=["queued", "running"],
+    )
     return done
 
 
