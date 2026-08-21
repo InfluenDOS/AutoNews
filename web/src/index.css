@@ -167,27 +167,23 @@ textarea {
 .side-collapse-btn {
   appearance: none;
   flex-shrink: 0;
-  width: 2rem;
+  width: 1.35rem;
   height: 2rem;
   margin: 0;
   padding: 0;
-  border: 1px solid transparent;
-  border-radius: 10px;
+  border: 0;
+  border-radius: 8px;
   background: transparent;
   color: var(--ink-soft);
   cursor: pointer;
   display: grid;
   place-items: center;
-  transition:
-    background 0.2s ease,
-    color 0.2s ease,
-    border-color 0.2s ease;
+  transition: color 0.2s ease, background 0.2s ease;
 }
 
 .side-collapse-btn:hover {
-  color: var(--accent-ink);
-  background: var(--accent);
-  border-color: transparent;
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .side-collapse-chevron {
@@ -1671,29 +1667,23 @@ a.auth-switch {
 
   .mobile-open-btn {
     display: grid;
-    width: 2.55rem;
-    height: 2.55rem;
-    border-radius: 12px;
-    border: 1px solid var(--line);
-    background: rgba(255, 255, 255, 0.06);
+    width: 2.2rem;
+    height: 2.2rem;
+    border-radius: 10px;
+    border: 0;
+    background: transparent;
     color: var(--ink);
-    font-size: 1.05rem;
+    font-size: 1.15rem;
   }
 
   .mobile-open-btn:hover {
-    background: var(--accent);
-    border-color: transparent;
-    color: var(--accent-ink);
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--accent);
   }
 
   .app-shell:not(.sidebar-collapsed) .side-brand-row {
     flex-direction: row;
     align-items: center;
-  }
-
-  .app-shell:not(.sidebar-collapsed) .side-collapse-btn {
-    width: 2.2rem;
-    height: 2.2rem;
   }
 
   .sidebar-scrim {
