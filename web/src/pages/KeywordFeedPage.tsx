@@ -1,0 +1,285 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Navigate, useParams } from 'react-router-dom'
+import { ArticleCard } from '../components/ArticleCard'
+import { useAuth } from '../context/AuthContext'
+import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
+import { articleMatchesKeywords, keywordMatchTerms } from '../lib/normalize'
+import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import type { Article, Keyword } from '../types'
+
+const REFRESH_MS = 60_000
+
+function formatUpdatedAt(value: string | number | Date | null | undefined) {
+  if (!value) return null
+  try {
+    const d = value instanceof Date ? value : new Date(value)
+    if (Number.isNaN(d.getTime())) return null
+    return new Intl.DateTimeFormat('zh-CN', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(d)
+  } catch {
+    return null
+  }
+}
+
+type Props = {
+  /** Show news for every keyword (parent「关键词」tab). */
+  all?: boolean
+}
+
+function AiProgressPanel({
+  pending,
+  readyCount,
+}: {
+  pending: Keyword[]
+  readyCount: number
+}) {
+  const names = pending.map((k) => k.phrase).join('、')
+  return (
+    <div className="ai-progress">
+      <div className="ai-progress-bar" aria-hidden>
+        <span className="ai-progress-bar-fill" />
+      </div>
+      <h3 className="ai-progress-title">AI 处理中</h3>
+      <ol className="ai-progress-steps">
+        <li className="is-done">已保存关键词{names ? `：${names}` : ''}</li>
+        <li className="is-active">正在扩展检索词（多语言匹配）…</li>
+        <li className={readyCount > 0 ? 'is-done' : ''}>
+          {readyCount > 0
+            ? `已有 ${readyCount} 个词就绪，其余完成后会继续匹配`
+            : '检索词就绪后自动匹配相关新闻'}
+        </li>
+      </ol>
+      <p className="muted ai-progress-hint">
+        通常由定时任务完成扩展与抓取，约数分钟。本页会自动刷新。
+      </p>
+    </div>
+  )
+}
+
+export function KeywordFeedPage({ all = false }: Props) {
+  const { keywordId } = useParams()
+  const { user } = useAuth()
+  const { keywords, loading: kwLoading, refresh } = useKeywords()
+  const [articles, setArticles] = useState<Article[]>([])
+  const [starredIds, setStarredIds] = useState<Set<string>>(new Set())
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
+
+  const keyword = useMemo(
+    () => (all ? null : keywords.find((k) => k.id === keywordId) ?? null),
+    [all, keywords, keywordId],
+  )
+
+  const pendingKeywords = useMemo(() => {
+    if (all) return keywords.filter((k) => !keywordAiReady(k))
+    return keyword && !keywordAiReady(keyword) ? [keyword] : []
+  }, [all, keywords, keyword])
+
+  const readyKeywords = useMemo(() => {
+    if (all) return keywords.filter(keywordAiReady)
+    return keyword && keywordAiReady(keyword) ? [keyword] : []
+  }, [all, keywords, keyword])
+
+  const aiPending = pendingKeywords.length > 0
+  const showFeed = readyKeywords.length > 0
+
+  const load = useCallback(async () => {
+    if (!isSupabaseConfigured || !user) {
+      setArticles([])
+      setStarredIds(new Set())
+      setLoading(false)
+      return
+    }
+    setError(null)
+
+    const [{ data: stars }, { data: hitRows, error: hitErr }] = await Promise.all([
+      supabase.from('stars').select('article_id').eq('user_id', user.id),
+      supabase.from('article_hits').select('article_id, articles(*)').eq('user_id', user.id),
+    ])
+
+    if (hitErr) {
+      setError(hitErr.message)
+      setLoading(false)
+      return
+    }
+
+    const list: Article[] = []
+    for (const row of hitRows ?? []) {
+      const raw = (row as { articles?: Article | Article[] | null }).articles
+      const a = Array.isArray(raw) ? raw[0] : raw
+      if (a) list.push(a)
+    }
+    list.sort((a, b) => {
+      const ta = a.published_at ? Date.parse(a.published_at) : 0
+      const tb = b.published_at ? Date.parse(b.published_at) : 0
+      return tb - ta
+    })
+
+    setArticles(list.slice(0, 200))
+    setStarredIds(new Set((stars ?? []).map((s: { article_id: string }) => s.article_id)))
+    setUpdatedAt(new Date())
+    setLoading(false)
+  }, [user])
+
+  useEffect(() => {
+    void load()
+    const id = window.setInterval(() => void load(), REFRESH_MS)
+    return () => window.clearInterval(id)
+  }, [load])
+
+  // Faster refresh while AI is pending
+  useEffect(() => {
+    if (!aiPending) return
+    const id = window.setInterval(() => {
+      void refresh()
+      void load()
+    }, 10_000)
+    return () => window.clearInterval(id)
+  }, [aiPending, refresh, load])
+
+  const visible = useMemo(() => {
+    if (readyKeywords.length === 0) return []
+    return articles.filter((a) =>
+      readyKeywords.some((k) => articleMatchesKeywords(a, keywordMatchTerms(k))),
+    )
+  }, [articles, readyKeywords])
+
+  const matchedFor = useCallback(
+    (article: Article) =>
+      readyKeywords
+        .filter((k) => articleMatchesKeywords(article, keywordMatchTerms(k)))
+        .map((k) => k.phrase),
+    [readyKeywords],
+  )
+
+  const lastUpdatedLabel = useMemo(() => {
+    let latest = 0
+    for (const a of visible) {
+      const t = Date.parse(a.published_at || a.created_at || '') || 0
+      if (t > latest) latest = t
+    }
+    if (latest > 0) return formatUpdatedAt(latest)
+    return formatUpdatedAt(updatedAt)
+  }, [visible, updatedAt])
+
+  async function toggleStar(articleId: string) {
+    if (!user) return
+    const starred = starredIds.has(articleId)
+    if (starred) {
+      const { error: err } = await supabase
+        .from('stars')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('article_id', articleId)
+      if (err) {
+        setError(err.message)
+        return
+      }
+      setStarredIds((prev) => {
+        const next = new Set(prev)
+        next.delete(articleId)
+        return next
+      })
+    } else {
+      const { error: err } = await supabase.from('stars').insert({
+        user_id: user.id,
+        article_id: articleId,
+      })
+      if (err) {
+        setError(err.message)
+        return
+      }
+      setStarredIds((prev) => new Set(prev).add(articleId))
+    }
+  }
+
+  if (!user) {
+    return <Navigate to="/auth" replace />
+  }
+
+  if (!all && !kwLoading && keywordId && !keyword) {
+    return <Navigate to="/keywords" replace />
+  }
+
+  const title = all ? '全部关键词' : keyword?.phrase || '关键词新闻'
+  const lead = all
+    ? '汇总你所有关键词匹配到的报道。点标题阅读中文短讯，底部可打开原文。'
+    : '仅显示与该关键词匹配的报道。点标题阅读中文短讯，底部可打开原文。'
+
+  return (
+    <>
+      <section className="hero">
+        <div className="hero-copy">
+          <p className="eyebrow">{all ? 'All Keywords' : 'Keyword Feed'}</p>
+          <h1>{title}</h1>
+          <p className="hero-lead">{kwLoading ? '加载关键词中…' : lead}</p>
+          <p className="hero-updated">
+            {loading || kwLoading
+              ? '更新时间加载中…'
+              : lastUpdatedLabel
+                ? `上次更新 ${lastUpdatedLabel}`
+                : '暂无更新时间'}
+          </p>
+        </div>
+        <div className="hero-window" aria-hidden="true" />
+      </section>
+
+      <section className="glass-panel feed">
+        <div className="panel-head">
+          <h2>{aiPending && !showFeed ? 'AI 进程' : '匹配结果'}</h2>
+          <span className="muted">
+            {loading || kwLoading
+              ? '加载中'
+              : aiPending && !showFeed
+                ? '处理中'
+                : `${visible.length} 条`}
+          </span>
+        </div>
+
+        {error && <p className="error">{error}</p>}
+
+        {aiPending && (
+          <AiProgressPanel pending={pendingKeywords} readyCount={readyKeywords.length} />
+        )}
+
+        {loading || kwLoading ? (
+          !aiPending && <p className="muted">正在加载新闻…</p>
+        ) : showFeed ? (
+          visible.length === 0 ? (
+            <div className="empty">
+              <p>暂时没有匹配的新闻。</p>
+              <p className="muted">
+                {all
+                  ? '当前订阅源里还没有足够贴近你关键词的报道，稍后再看。'
+                  : `当前订阅源里还没有足够贴近「${keyword?.phrase}」的报道，稍后再看。`}
+              </p>
+            </div>
+          ) : (
+            <div className="story-list">
+              {visible.map((article) => (
+                <ArticleCard
+                  key={article.id}
+                  article={article}
+                  starred={starredIds.has(article.id)}
+                  matchedKeywords={matchedFor(article)}
+                  canStar
+                  onToggleStar={() => void toggleStar(article.id)}
+                />
+              ))}
+            </div>
+          )
+        ) : !aiPending ? (
+          <div className="empty">
+            <p>{all ? '还没有关键词。' : '关键词不存在。'}</p>
+            <p className="muted">
+              {all ? '在左侧点「添加关键词」，在侧栏直接输入即可。' : '请从左侧重新选择。'}
+            </p>
+          </div>
+        ) : null}
+      </section>
+    </>
+  )
+}
