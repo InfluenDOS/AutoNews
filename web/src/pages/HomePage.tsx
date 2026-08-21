@@ -3,19 +3,20 @@ import { Link } from 'react-router-dom'
 import { ArticleCard } from '../components/ArticleCard'
 import { Spinner } from '../components/Spinner'
 import { useAuth } from '../context/AuthContext'
+import { useKeywordWorkspace } from '../context/KeywordWorkspace'
 import { useToast } from '../context/ToastContext'
 import { requestCrawl } from '../lib/crawl'
 import { articleMatchesKeywords, keywordMatchTerms } from '../lib/normalize'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
-import type { Article, Keyword } from '../types'
+import type { Article } from '../types'
 
 const REFRESH_MS = 60_000
 
 export function HomePage() {
   const { user } = useAuth()
   const { showToast } = useToast()
+  const { selected, keywords, refreshKeywords } = useKeywordWorkspace()
   const [articles, setArticles] = useState<Article[]>([])
-  const [keywords, setKeywords] = useState<Keyword[]>([])
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
@@ -31,13 +32,12 @@ export function HomePage() {
         return
       }
       if (!opts?.quiet) setError(null)
-      const articlesQuery = supabase
+      const { data: articleRows, error: articleErr } = await supabase
         .from('articles')
         .select('*')
         .order('published_at', { ascending: false, nullsFirst: false })
-        .limit(200)
+        .limit(300)
 
-      const { data: articleRows, error: articleErr } = await articlesQuery
       if (articleErr) {
         setError(articleErr.message)
         setLoading(false)
@@ -46,19 +46,18 @@ export function HomePage() {
       setArticles((articleRows as Article[]) ?? [])
 
       if (user) {
-        const [{ data: kw }, { data: stars }] = await Promise.all([
-          supabase.from('keywords').select('*').eq('user_id', user.id),
-          supabase.from('stars').select('article_id').eq('user_id', user.id),
-        ])
-        setKeywords((kw as Keyword[]) ?? [])
+        const { data: stars } = await supabase
+          .from('stars')
+          .select('article_id')
+          .eq('user_id', user.id)
         setStarredIds(new Set((stars ?? []).map((s: { article_id: string }) => s.article_id)))
+        await refreshKeywords({ quiet: true })
       } else {
-        setKeywords([])
         setStarredIds(new Set())
       }
       setLoading(false)
     },
-    [user],
+    [user, refreshKeywords],
   )
 
   useEffect(() => {
@@ -68,20 +67,18 @@ export function HomePage() {
   }, [load])
 
   const phrases = useMemo(
-    () => keywords.flatMap((k) => keywordMatchTerms(k)),
-    [keywords],
+    () => (selected ? keywordMatchTerms(selected) : []),
+    [selected],
   )
 
-  const pendingKeywords = useMemo(
-    () => keywords.filter((k) => !(k.search_terms || []).length).length,
-    [keywords],
-  )
+  const pendingSelected = Boolean(selected && !(selected.search_terms || []).length)
 
   const visible = useMemo(() => {
     if (!user) return articles
+    if (!selected) return []
     if (phrases.length === 0) return []
     return articles.filter((a) => articleMatchesKeywords(a, phrases))
-  }, [articles, phrases, user])
+  }, [articles, phrases, user, selected])
 
   async function onRefresh() {
     if (refreshing) return
@@ -151,27 +148,29 @@ export function HomePage() {
     setStarringId(null)
   }
 
-  function matchedFor(article: Article): string[] {
-    if (keywords.length === 0) return []
-    return keywords
-      .filter((kw) => articleMatchesKeywords(article, keywordMatchTerms(kw)))
-      .map((kw) => kw.phrase)
-  }
+  const title = selected?.phrase || (user ? '选择关键词' : '今天的新闻')
+  const subtitle = !user
+    ? '登录后可在左侧添加关键词，并按关键词浏览匹配新闻。'
+    : !selected
+      ? keywords.length === 0
+        ? '点击左侧「+」添加第一个关键词。'
+        : '在左侧选择一个关键词查看对应新闻。'
+      : pendingSelected
+        ? '该关键词正在 AI 提炼检索词，完成后会出现匹配新闻。'
+        : selected.ai_note || '已按当前关键词筛选，点标题可阅读中文详情。'
 
   return (
     <section className="feed">
       <div className="feed-header">
         <div>
-          <h1>今天的新闻</h1>
-          <p className="muted">
-            {user
-              ? phrases.length > 0
-                ? '已按你的关键词筛选，点标题可阅读中文详情。'
-                : pendingKeywords > 0
-                  ? `有 ${pendingKeywords} 个关键词还在 AI 提炼中，完成后才会出现匹配新闻。`
-                  : '先去添加关键词，我们才会开始帮你找新闻。'
-              : '登录后就能订阅关键词，并把喜欢的新闻收进收藏夹。'}
-          </p>
+          <p className="eyebrow">{user ? 'Keyword feed' : 'Welcome'}</p>
+          <h1>{title}</h1>
+          <p className="muted">{subtitle}</p>
+          {selected && (selected.search_terms || []).length > 0 && (
+            <p className="kw-terms feed-terms">
+              检索词：{(selected.search_terms || []).join(' · ')}
+            </p>
+          )}
         </div>
         <div className="feed-controls">
           {user && (
@@ -192,47 +191,60 @@ export function HomePage() {
           >
             {refreshing ? '刷新中…' : '刷新'}
           </button>
-          {user && (
-            <Link className="btn btn-sm btn-ghost" to="/keywords">
-              管理关键词
-            </Link>
-          )}
         </div>
       </div>
 
       {error && <p className="error">{error}</p>}
       {info && <p className="ok">{info}</p>}
-      {user && pendingKeywords > 0 && (
+      {user && pendingSelected && (
         <div className="ai-processing-banner" role="status">
           <Spinner size="md" />
           <div>
-            <strong>关键词 AI 处理中</strong>
-            <p>
-              {pendingKeywords} 个还在提炼检索词 · 完成后匹配新闻会出现在下方
-            </p>
+            <strong>AI 正在处理「{selected?.phrase}」</strong>
+            <p>约 1～3 分钟 · 左侧该关键词旁有转圈提示</p>
           </div>
         </div>
       )}
+
       {loading ? (
         <p className="muted">正在加载新闻…</p>
+      ) : !user ? (
+        <div className="card-grid">
+          {articles.slice(0, 12).map((article) => (
+            <ArticleCard
+              key={article.id}
+              article={article}
+              starred={false}
+              canStar={false}
+            />
+          ))}
+          {articles.length === 0 && (
+            <div className="empty">
+              <p>暂无公开新闻。</p>
+              <p className="muted">
+                <Link to="/auth">登录</Link> 后添加关键词开始订阅。
+              </p>
+            </div>
+          )}
+        </div>
+      ) : !selected ? (
+        <div className="empty">
+          <p>还没有选中的关键词。</p>
+          <p className="muted">用左侧「+」新建一个关注点即可。</p>
+        </div>
       ) : visible.length === 0 ? (
         <div className="empty">
-          {user && phrases.length === 0 ? (
+          {pendingSelected ? (
             <>
-              <p>{pendingKeywords > 0 ? '关键词还在准备中。' : '还没有关键词。'}</p>
-              <p className="muted">
-                去 <Link to="/keywords">关键词</Link>
-                {pendingKeywords > 0
-                  ? ' 查看 AI 进度；提炼完成后回这里刷新即可。'
-                  : ' 用中文描述你想关注的内容。'}
-              </p>
+              <p>关键词还在准备中。</p>
+              <p className="muted">提炼完成后，匹配新闻会出现在这里。</p>
             </>
           ) : (
             <>
               <p>暂时没有匹配的新闻。</p>
               <p className="muted">
-                这说明当前巴尔干主流媒体 RSS 里，还没有足够贴近你关键词的报道。
-                系统不会再展示无关新闻。可换更宽/更具体的关键词，或稍后再点「手动抓取」。
+                当前巴尔干主流媒体 RSS 里还没有足够贴近「{selected.phrase}」的报道。
+                可换更宽/更具体的关键词，或稍后再点「手动抓取」。
               </p>
             </>
           )}
@@ -244,8 +256,7 @@ export function HomePage() {
               key={article.id}
               article={article}
               starred={starredIds.has(article.id)}
-              matchedKeywords={user ? matchedFor(article) : undefined}
-              canStar={Boolean(user)}
+              canStar
               starBusy={starringId === article.id}
               onToggleStar={() => void toggleStar(article.id)}
             />
