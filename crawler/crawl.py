@@ -166,9 +166,9 @@ def crawl() -> None:
         try:
             feed = fetch_feed(source.url)
             entries = feed.entries or []
-            print(f"[{source.name}] scanned {len(entries)} from {source.url}")
+            print(f"[{source.country}/{source.name}] scanned {len(entries)} from {source.url}")
         except Exception as exc:  # noqa: BLE001
-            print(f"[{source.name}] FAILED {source.url}: {exc}", file=sys.stderr)
+            print(f"[{source.country}/{source.name}] FAILED {source.url}: {exc}", file=sys.stderr)
             continue
 
         for entry in entries:

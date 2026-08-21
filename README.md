@@ -1,13 +1,13 @@
-# AutoNews — Serbian keyword news MVP
+# AutoNews — Balkan keyword news MVP
 
-Subscribe to mainstream Serbian media (Blic, B92, RTS, Novosti) by keyword.
+Subscribe to mainstream Balkan peninsula media by keyword.
 Star articles into a personal favorites list. Frontend on GitHub Pages; data and auth on Supabase; RSS crawl via GitHub Actions.
 
 ## Architecture
 
 ```
 User → GitHub Pages (React) → Supabase (Auth + Postgres)
-GitHub Actions (every 15 min) → RSS feeds → Supabase articles
+GitHub Actions (every 15 min) → Balkan RSS feeds → Supabase articles
 ```
 
 ## 1. Supabase setup
@@ -35,7 +35,7 @@ Open the printed URL (usually `http://localhost:5173`).
 
 ## 3. Crawler + AI (local)
 
-中文模糊句 → AI 提炼塞尔维亚检索词；新闻标题/摘要 → AI 译成中文。
+中文模糊句 → AI 提炼巴尔干当地语言检索词；新闻标题/摘要 → AI 译成中文。
 
 默认对接 **DeepSeek**（OpenAI 兼容）。也可改 `AI_BASE_URL` / `AI_MODEL` 使用 OpenAI 等。
 
@@ -90,19 +90,27 @@ In the GitHub repo: **Settings → Secrets and variables → Actions**, add:
 ## Product features (MVP)
 
 - Email register / login / logout
-- Per-user keywords (Latin ↔ Cyrillic aware matching)
-- Public news pool from RSS; logged-in users filter by keywords
+- Per-user keywords (Latin ↔ Cyrillic aware matching); add/delete triggers an immediate crawl
+- Public news pool from Balkan RSS; logged-in users filter by keywords
 - Star / unstar → favorites page
 - Title, summary, source, time, and outbound link only (no full-text republication)
 
 ## RSS sources
 
-Configured in [`crawler/sources.py`](crawler/sources.py):
+Configured in [`crawler/sources.py`](crawler/sources.py) (verified endpoints):
 
-- Blic
-- B92
-- RTS
-- Novosti
+| Region | Sources |
+| --- | --- |
+| Serbia | Blic, B92, RTS, Novosti, N1, Danas |
+| Croatia | Jutarnji, Večernji, 24sata, N1, Telegram, Net.hr |
+| BiH | Klix, Avaz, N1, Radio Sarajevo |
+| Montenegro | CDM, RTCG, MINA |
+| North Macedonia | Meta.mk, Nova Makedonija, MRT, Telma |
+| Albania | BalkanWeb, Tirana Times |
+| Kosovo | Koha, Gazeta Express, Kallxo, Prishtina Insight |
+| Slovenia | 24ur, Delo, N1 |
+| Bulgaria | Actualno |
+| Regional EN | Balkan Insight |
 
 ## License / copyright
 

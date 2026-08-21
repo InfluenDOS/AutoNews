@@ -67,7 +67,7 @@ export function KeywordsPage() {
   async function triggerCrawlAfterKeywordChange() {
     const result = await requestCrawl()
     if (result.ok) {
-      setInfo('已保存并开始处理：AI 先提炼塞尔维亚检索词，再抓新闻（约 1～3 分钟），本页会自动更新')
+      setInfo('已保存并开始处理：AI 先提炼巴尔干检索词，再抓新闻（约 1～3 分钟），本页会自动更新')
       showToast('已开始处理关键词', 'ok')
       return
     }
@@ -143,8 +143,8 @@ export function KeywordsPage() {
     <section className="panel">
       <h1>关键词</h1>
       <p className="muted">
-        用中文描述关注点即可。中文不能直接搜塞尔维亚媒体，所以需要等 AI
-        提炼检索词（约 1～3 分钟）；添加后会自动开始，本页会自动刷新，不用干等着狂点。
+        用中文描述关注点即可。中文不能直接搜巴尔干各国媒体，所以需要等 AI
+        提炼当地语言检索词（约 1～3 分钟）；添加后会自动开始，本页会自动刷新，不用干等着狂点。
       </p>
 
       <form className="form row" onSubmit={onAdd}>

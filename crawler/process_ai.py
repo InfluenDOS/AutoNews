@@ -11,18 +11,20 @@ from normalize import normalize_for_match
 from crawl import get_supabase
 
 
-EXPAND_SYSTEM = """你是塞尔维亚新闻检索助手。用户用中文描述话题（可能较模糊）。
-请提取能在塞尔维亚媒体标题/摘要中命中的检索词。
+EXPAND_SYSTEM = """你是巴尔干半岛新闻检索助手。用户用中文描述话题（可能较模糊）。
+媒体覆盖塞尔维亚、克罗地亚、波黑、黑山、北马其顿、阿尔巴尼亚、科索沃、斯洛文尼亚、保加利亚及区域英语媒体。
+
+请提取能在上述媒体标题/摘要中命中的检索词。
 
 输出 JSON：{"search_terms":["..."],"ai_note":"..."}
 
 硬性规则：
-1. search_terms 给 6～12 个，优先「话题核心词 + 常见变格/派生」，不要只给整句套话。
-2. 对「选举」这类话题，必须包含核心词及其常见形式，例如：izbori、izbore、izborima、izborna、izborni、glasanje；可再加短语如 parlamentarni izbori。
+1. search_terms 给 6～12 个。以塞尔维亚-克罗地亚-波斯尼亚语（拉丁字母）为核心（三国媒体互通），再按话题需要补充：马其顿语/保加利亚语、阿尔巴尼亚语、斯洛文尼亚语、英语专名。
+2. 对「选举」这类话题，必须包含核心词及其常见形式，例如：izbori、izbore、izborima、izborna、izborni、glasanje、zgjedhjet（阿语）；可再加短语如 parlamentarni izbori。
 3. 禁止过宽单词语：Kina、kineski、migranti、Srbija、Balkan、Beograd、vesti、premijer、premijerka、predsednik、vlada。
 4. 禁止绑死年份（不要 izbori 2023 / 2024），除非用户明确只要某年。
 5. 注意假朋友：premijera=电影首映，premijer=总理。
-6. 专名给拉丁+西里尔常见写法（Vučić/Вучић）；ai_note 一句中文；不要 Markdown。"""
+6. 专名给常见写法（Vučić/Вучић、Zagreb、Sarajevo、Tirana 等）；ai_note 一句中文；不要 Markdown。"""
 
 
 TRANSLATE_SYSTEM = """你是新华社/财新风格的国际新闻改写编辑。输入可能是塞尔维亚语（拉丁或西里尔）或英语的耸动标题+摘要。
