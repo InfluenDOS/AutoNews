@@ -10,10 +10,10 @@ export async function requestCrawl(): Promise<CrawlTriggerResult> {
   if (error) {
     const raw = error.message || ''
     if (raw.includes('wait 2 minutes')) {
-      return { ok: false, kind: 'rate_limit', message: '请稍等 2 分钟再抓取' }
+      return { ok: false, kind: 'rate_limit', message: '操作过于频繁，请两分钟后再试' }
     }
     if (raw.includes('sign in')) {
-      return { ok: false, kind: 'auth', message: '请先登录' }
+      return { ok: false, kind: 'auth', message: '请先登录后再更新' }
     }
     return { ok: false, kind: 'error', message: raw }
   }
@@ -23,7 +23,7 @@ export async function requestCrawl(): Promise<CrawlTriggerResult> {
     return {
       ok: false,
       kind: 'config',
-      message: '手动抓取尚未配置完成，请稍后再试或联系管理员',
+      message: '更新服务尚未就绪，请稍后再试或联系管理员',
     }
   }
 

@@ -88,7 +88,7 @@ export function KeywordWorkspaceProvider({ children }: { children: ReactNode }) 
       const rows = (data as Keyword[]) ?? []
       const pending = rows.some(isPending)
       if (hadPendingRef.current && !pending && rows.length > 0) {
-        showToast('关键词已就绪', 'ok')
+        showToast('专题已就绪', 'ok')
       }
       hadPendingRef.current = pending
       setKeywords(rows)
@@ -149,11 +149,11 @@ export function KeywordWorkspaceProvider({ children }: { children: ReactNode }) 
   async function triggerCrawlAfterChange() {
     const result = await requestCrawl()
     if (result.ok) {
-      showToast('已开始处理关键词', 'ok')
+      showToast('已开始解析专题', 'ok')
       return
     }
     if (result.kind === 'rate_limit') {
-      showToast('已保存，抓取冷却中', 'info')
+      showToast('专题已保存，更新冷却中', 'info')
       return
     }
     showToast(result.message, 'info')
@@ -177,12 +177,12 @@ export function KeywordWorkspaceProvider({ children }: { children: ReactNode }) 
         .select('*')
         .single()
       if (error) {
-        showToast(error.message || '添加失败', 'error')
+        showToast(error.message || '创建失败', 'error')
         setSaving(false)
         return null
       }
       const row = data as Keyword
-      showToast('已添加，正在交给 AI…', 'ok')
+      showToast('专题已创建，正在解析…', 'ok')
       await refreshKeywords({ quiet: true })
       selectKeyword(row.id)
       await triggerCrawlAfterChange()
@@ -199,11 +199,11 @@ export function KeywordWorkspaceProvider({ children }: { children: ReactNode }) 
       setSaving(true)
       const { error } = await supabase.from('keywords').delete().eq('id', id)
       if (error) {
-        showToast(error.message || '删除失败', 'error')
+        showToast(error.message || '移除失败', 'error')
         setSaving(false)
         return false
       }
-      showToast('已删除关键词', 'ok')
+      showToast('专题已移除', 'ok')
       const remaining = keywords.filter((k) => k.id !== id)
       setKeywords(remaining)
       if (remaining[0]) selectKeyword(remaining[0].id)

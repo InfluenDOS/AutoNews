@@ -85,7 +85,7 @@ export function StarsPage() {
       <div className="feed-header">
         <div>
           <h1>收藏夹</h1>
-          <p className="muted">你标星收藏的新闻都在这里。</p>
+          <p className="muted">您收藏的报道都在这里，便于回看与分享。</p>
         </div>
       </div>
 
@@ -96,7 +96,7 @@ export function StarsPage() {
         <div className="empty">
           <p>还没有收藏。</p>
           <p className="muted">
-            打开 <Link to="/">新闻</Link>，点击 ★ 即可加入收藏夹。
+            打开 <Link to="/">要闻</Link>，点击 ★ 即可加入收藏。
           </p>
         </div>
       ) : (

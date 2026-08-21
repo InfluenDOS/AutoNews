@@ -166,7 +166,7 @@ export function ArticleDetailPage() {
         {lead ? <p className="reader-lead">{lead}</p> : null}
 
         {!translated && (
-          <p className="card-hint">中文改写尚未完成，正文可能仍接近原文摘要。</p>
+          <p className="card-hint">中文译本尚未就绪，正文可能仍接近原文摘要。</p>
         )}
       </header>
 
