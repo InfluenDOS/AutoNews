@@ -1758,13 +1758,16 @@ a.auth-switch {
     border-right: 1px solid var(--line);
     border-bottom: 0;
     overflow: visible;
-    transform: translateX(0);
+    /* Disable rise animation: its fill-mode transform fights the drawer slide. */
+    animation: none;
+    transform: translate3d(0, 0, 0);
     transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
     box-shadow: 12px 0 40px rgba(0, 0, 0, 0.35);
+    background: rgba(8, 14, 11, 0.94);
   }
 
   .app-shell.sidebar-collapsed .sidebar {
-    transform: translateX(-105%);
+    transform: translate3d(-105%, 0, 0);
     box-shadow: none;
     pointer-events: none;
   }

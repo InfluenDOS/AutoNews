@@ -29,6 +29,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(() => {
     try {
+      if (typeof window !== 'undefined' && window.matchMedia(MOBILE_MQ).matches) {
+        return true
+      }
       return localStorage.getItem(STORAGE_KEY) === '1'
     } catch {
       return false
