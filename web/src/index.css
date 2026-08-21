@@ -1719,12 +1719,7 @@ a.auth-switch {
   }
 
   .app-shell.sidebar-collapsed .side-toggle-icon {
-    transform: rotate(90deg);
-  }
-
-  .app-shell.sidebar-collapsed .sidebar-body {
-    padding-left: 1.1rem;
-    padding-right: 1.1rem;
+    transform: none;
   }
 
   .side-nav {
@@ -1737,34 +1732,88 @@ a.auth-switch {
     width: auto;
   }
 
-  .app-shell.sidebar-collapsed .brand-name {
+  .side-poem {
     display: none;
   }
 
-  .app-shell.sidebar-collapsed .nav-label {
-    display: none;
-  }
-
-  .app-shell.sidebar-collapsed .nav-icon {
+  /* Collapsed mobile: one clean app bar (brand + menu), hide nav clutter. */
+  .app-shell.sidebar-collapsed .sidebar {
     display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    overflow: hidden;
   }
 
-  .app-shell.sidebar-collapsed .side-nav a,
-  .app-shell.sidebar-collapsed .side-logout {
-    justify-content: center;
-    padding: 0.75rem 0.4rem;
+  .app-shell.sidebar-collapsed .sidebar-body {
+    grid-column: 1;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.7rem 0.35rem 0.7rem 1rem;
+    overflow: hidden;
   }
 
-  .app-shell.sidebar-collapsed .side-nav {
+  .app-shell.sidebar-collapsed .side-brand {
+    flex: 1;
+    min-width: 0;
+    justify-content: flex-start;
+    padding: 0.15rem 0;
+  }
+
+  .app-shell.sidebar-collapsed .brand-name {
     display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
   }
 
+  .app-shell.sidebar-collapsed .side-nav,
+  .app-shell.sidebar-collapsed .side-group,
   .app-shell.sidebar-collapsed .side-poem {
     display: none;
   }
 
-  .side-poem {
-    display: none;
+  .app-shell.sidebar-collapsed .side-toggle {
+    position: relative;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    grid-column: 2;
+    width: 2.55rem;
+    height: 2.55rem;
+    margin: 0 0.75rem 0 0;
+    transform: none;
+    color: var(--ink);
+    border-radius: 12px;
+  }
+
+  .app-shell.sidebar-collapsed .side-toggle-rail {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: none;
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .app-shell.sidebar-collapsed .side-toggle:hover {
+    width: 2.55rem;
+    height: 2.55rem;
+  }
+
+  .app-shell.sidebar-collapsed .side-toggle:hover .side-toggle-rail {
+    background: var(--accent);
+    border-color: transparent;
+    box-shadow: none;
+  }
+
+  .app-shell.sidebar-collapsed .side-toggle-icon {
+    font-size: 0;
+    line-height: 0;
+  }
+
+  .app-shell.sidebar-collapsed .side-toggle-icon::before {
+    content: '☰';
+    font-size: 1.15rem;
+    line-height: 1;
+    font-weight: 700;
   }
 
   .hero {
