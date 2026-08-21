@@ -522,8 +522,7 @@ textarea {
 
 .app-shell.sidebar-collapsed .side-kw-delete,
 .app-shell.sidebar-collapsed .side-add,
-.app-shell.sidebar-collapsed .side-add-form,
-.app-shell.sidebar-collapsed .side-children-panel {
+.app-shell.sidebar-collapsed .side-add-form {
   display: none !important;
 }
 
