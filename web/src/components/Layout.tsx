@@ -192,16 +192,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </div>
 
       <header className="mobile-topbar">
-        <Link to="/" className="side-brand mobile-topbar-brand" title="AutoNews">
-          <BrandLogo />
-          <span className="brand-name">
-            AutoNews
-            <small>关键词订阅新闻</small>
-          </span>
-        </Link>
         <button
           type="button"
-          className="mobile-menu-btn"
+          className="side-collapse-btn mobile-open-btn"
           aria-expanded={!collapsed}
           aria-controls="side-nav"
           title="打开侧边栏"
@@ -209,6 +202,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
         >
           <span aria-hidden="true">☰</span>
         </button>
+        <Link to="/" className="side-brand mobile-topbar-brand" title="AutoNews">
+          <BrandLogo />
+          <span className="brand-name">
+            AutoNews
+            <small>关键词订阅新闻</small>
+          </span>
+        </Link>
       </header>
 
       <button
@@ -221,13 +221,27 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
       <aside className="sidebar" aria-label="主导航">
         <div className="sidebar-body">
-          <Link to="/" className="side-brand" title="AutoNews">
-            <BrandLogo />
-            <span className="brand-name">
-              AutoNews
-              <small>关键词订阅新闻</small>
-            </span>
-          </Link>
+          <div className="side-brand-row">
+            <button
+              type="button"
+              className="side-collapse-btn"
+              onClick={toggleSidebar}
+              aria-expanded={!collapsed}
+              aria-controls="side-nav"
+              title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+            >
+              <span className="side-collapse-chevron" aria-hidden="true">
+                ‹
+              </span>
+            </button>
+            <Link to="/" className="side-brand" title="AutoNews">
+              <BrandLogo />
+              <span className="brand-name">
+                AutoNews
+                <small>关键词订阅新闻</small>
+              </span>
+            </Link>
+          </div>
 
           <nav id="side-nav" className="side-nav">
             <div className={`side-group${kwOpen ? '' : ' is-folded'}`}>
@@ -404,20 +418,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
             </div>
           )}
         </div>
-
-        <button
-          type="button"
-          className="side-toggle"
-          onClick={toggleSidebar}
-          aria-expanded={!collapsed}
-          aria-controls="side-nav"
-          title={collapsed ? '展开侧边栏' : '收起侧边栏'}
-        >
-          <span className="side-toggle-rail" aria-hidden />
-          <span className="side-toggle-icon" aria-hidden>
-            ‹
-          </span>
-        </button>
       </aside>
 
       <div className="content-shell">
