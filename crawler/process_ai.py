@@ -17,10 +17,11 @@ EXPAND_SYSTEM = """你是塞尔维亚新闻检索助手。用户用中文描述�
 输出 JSON：{"search_terms":["..."],"ai_note":"..."}
 
 硬性规则：
-1. search_terms 只给 4～10 个「短语」，每个至少 2 个词（例如 kineski migranti、kineski ilegalci、kineski radnici Srbija）。
-2. 禁止单独输出过宽单词语：Kina、kineski、migranti、imigranti、ilegalni、Srbija、Balkan、Beograd、vesti。
-3. 短语要同时体现用户意图的核心要素（例如「中国籍」+「非法移民/移民」），避免只命中其中一个要素的新闻。
-4. 可含拉丁与西里尔专名写法；ai_note 用一句中文说明；不要 Markdown。"""
+1. search_terms 只给 4～10 个「短语」，每个至少 2 个词（例如 kineski migranti、kineski ilegalci、predsednik Vučić、premijer Srbije）。
+2. 禁止单独输出过宽单词语：Kina、kineski、migranti、imigranti、ilegalni、Srbija、Balkan、Beograd、vesti、premijer、premijerka、predsednik、predsednica、vlada。
+3. 注意假朋友：premijera=电影首映，premijer=总理；绝不要用会误伤「首映/文化娱乐」的过短词。
+4. 短语要同时体现用户意图的核心要素（例如「中国籍」+「非法移民/移民」），避免只命中其中一个要素的新闻。
+5. 可含拉丁与西里尔专名写法；ai_note 用一句中文说明；不要 Markdown。"""
 
 
 TRANSLATE_SYSTEM = """你是新华社/财新风格的国际新闻改写编辑。输入可能是塞尔维亚语（拉丁或西里尔）或英语的耸动标题+摘要。

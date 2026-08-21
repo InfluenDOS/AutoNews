@@ -150,11 +150,25 @@ export function normalizeForMatch(text: string): string {
   return toLatin(text).toLocaleLowerCase('sr').trim()
 }
 
+function isWordChar(ch: string): boolean {
+  return /\p{L}|\p{N}/u.test(ch)
+}
+
+/** Whole-token/phrase match — avoids premijer (PM) hitting premijera (premiere). */
 export function matchesKeyword(haystack: string, keyword: string): boolean {
   const h = normalizeForMatch(haystack)
   const k = normalizeForMatch(keyword)
   if (!k) return false
-  return h.includes(k)
+  let start = 0
+  while (true) {
+    const i = h.indexOf(k, start)
+    if (i < 0) return false
+    const beforeOk = i === 0 || !isWordChar(h[i - 1]!)
+    const after = i + k.length
+    const afterOk = after >= h.length || !isWordChar(h[after]!)
+    if (beforeOk && afterOk) return true
+    start = i + 1
+  }
 }
 
 export function articleMatchesKeywords(
@@ -164,10 +178,9 @@ export function articleMatchesKeywords(
   if (phrases.length === 0) return false
   const combined = `${article.title} ${article.summary}`
   const normalized = article.raw_text_normalized || normalizeForMatch(combined)
-  return phrases.some((phrase) => {
-    const k = normalizeForMatch(phrase)
-    return k && (matchesKeyword(combined, phrase) || normalized.includes(k))
-  })
+  return phrases.some(
+    (phrase) => matchesKeyword(combined, phrase) || matchesKeyword(normalized, phrase),
+  )
 }
 
 const MATCH_STOPWORDS = new Set(
@@ -197,6 +210,14 @@ const BROAD_SINGLE_TERMS = new Set([
   'vojska',
   'kultura',
   'sport',
+  // Political titles alone are noisy; premijer ⊂ premijera (film premiere)
+  'premijer',
+  'premijerka',
+  'premijera',
+  'predsednik',
+  'predsednica',
+  'vlade',
+  'vlada',
 ])
 
 /** Prefer precise multi-word AI terms; never split into broad single tokens. */
