@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArticleCard } from '../components/ArticleCard'
+import { Spinner } from '../components/Spinner'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { requestCrawl } from '../lib/crawl'
@@ -201,6 +202,17 @@ export function HomePage() {
 
       {error && <p className="error">{error}</p>}
       {info && <p className="ok">{info}</p>}
+      {user && pendingKeywords > 0 && (
+        <div className="ai-processing-banner" role="status">
+          <Spinner size="md" />
+          <div>
+            <strong>关键词 AI 处理中</strong>
+            <p>
+              {pendingKeywords} 个还在提炼检索词 · 完成后匹配新闻会出现在下方
+            </p>
+          </div>
+        </div>
+      )}
       {loading ? (
         <p className="muted">正在加载新闻…</p>
       ) : visible.length === 0 ? (

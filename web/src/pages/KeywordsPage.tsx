@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
+import { Spinner } from '../components/Spinner'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { requestCrawl } from '../lib/crawl'
@@ -164,13 +165,21 @@ export function KeywordsPage() {
       {error && <p className="error">{error}</p>}
       {info && <p className="ok">{info}</p>}
       {pendingCount > 0 && (
-        <p className="status-pill" role="status">
-          {pendingCount} 个关键词正在 AI 处理中…
-        </p>
+        <div className="ai-processing-banner" role="status">
+          <Spinner size="md" />
+          <div>
+            <strong>AI 正在处理关键词</strong>
+            <p>
+              {pendingCount} 个待提炼 · 约 1～3 分钟 · 本页会自动更新，无需反复刷新
+            </p>
+          </div>
+        </div>
       )}
 
       {loading ? (
-        <p className="muted">加载中…</p>
+        <p className="muted">
+          <Spinner size="sm" label="加载中…" />
+        </p>
       ) : keywords.length === 0 ? (
         <p className="muted">还没有关键词。添加一句中文描述即可开始订阅。</p>
       ) : (
@@ -180,14 +189,16 @@ export function KeywordsPage() {
             const ready = terms.length > 0
             const deleting = deletingId === k.id
             return (
-              <li key={k.id} className="keyword-item">
+              <li key={k.id} className={`keyword-item${ready ? '' : ' is-processing'}`}>
                 <div>
                   <strong>{k.phrase}</strong>
                   {k.ai_note && <p className="kw-note">{k.ai_note}</p>}
                   {ready ? (
                     <p className="kw-terms">检索词：{terms.join(' · ')}</p>
                   ) : (
-                    <p className="kw-pending">AI 提炼中…约 1～3 分钟，本页会自动更新</p>
+                    <p className="kw-pending">
+                      <Spinner size="sm" label="AI 提炼中…约 1～3 分钟" />
+                    </p>
                   )}
                 </div>
                 <button
