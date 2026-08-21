@@ -695,7 +695,7 @@ textarea {
   width: max-content;
   margin: 0.12rem auto 0;
   padding: 0.2rem 0 0.1rem 0.42rem;
-  border-left: 1px solid rgba(255, 255, 255, 0.28);
+  border-left: 1px solid var(--line-soft);
   align-items: stretch;
 }
 
