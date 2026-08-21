@@ -6,12 +6,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="app-shell">
+      <div className="bg-grid" aria-hidden="true" />
+      <div className="bg-glow" aria-hidden="true" />
+
       <header className="topbar">
         <Link to="/" className="brand">
-          <span className="brand-mark">AN</span>
-          <span>
-            AutoNews
-            <small>塞尔维亚新闻 · 关键词订阅</small>
+          <span className="brand-mark" aria-hidden="true">
+            <span>AN</span>
+          </span>
+          <span className="brand-text">
+            <strong>AutoNews</strong>
+            <small>KEYWORD INTEL · SRBIJA</small>
           </span>
         </Link>
         <nav className="nav">
@@ -38,15 +43,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
       {!configured && (
         <div className="banner warn">
-          请先在 <code>web/.env</code> 中配置 <code>VITE_SUPABASE_URL</code> 与{' '}
-          <code>VITE_SUPABASE_ANON_KEY</code>，并执行 <code>supabase/migrations</code> 中的 SQL。
+          请先配置 Supabase 环境变量并执行数据库迁移。
         </div>
       )}
 
       <main className="main">{children}</main>
 
       <footer className="footer">
-        点击标题跳转原媒体网站 · 约每 15 分钟更新 RSS · 不转载全文
+        <div className="footer-line" />
+        <p>站内中文短讯 · 底部可打开原文 · RSS 定时更新 · 不转载全文</p>
       </footer>
     </div>
   )
