@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Link, NavLink, useNavigate } from 'react-router-dom'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useJobs } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
@@ -19,12 +19,14 @@ import {
 
 const STORAGE_KEY = 'autonews-sidebar-collapsed'
 const KW_OPEN_KEY = 'autonews-kw-open-v2'
+const MOBILE_MQ = '(max-width: 960px)'
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const { user, signOut, configured } = useAuth()
   const { keywords, addKeyword, deleteKeyword } = useKeywords()
   const { refreshJobs } = useJobs()
   const navigate = useNavigate()
+  const location = useLocation()
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(STORAGE_KEY) === '1'
@@ -53,6 +55,23 @@ export function Layout({ children }: { children: React.ReactNode }) {
     setAdding(false)
     setDraft('')
     setAddError(null)
+  }
+
+  function openSidebar() {
+    setCollapsed(false)
+  }
+
+  function closeSidebar() {
+    setCollapsed(true)
+    cancelAdd()
+  }
+
+  function toggleSidebar() {
+    setCollapsed((v) => !v)
+  }
+
+  function isMobileViewport() {
+    return typeof window !== 'undefined' && window.matchMedia(MOBILE_MQ).matches
   }
 
   useEffect(() => {
@@ -105,6 +124,33 @@ export function Layout({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  // On mobile, close the left drawer after navigation.
+  useEffect(() => {
+    if (!isMobileViewport()) return
+    setCollapsed(true)
+  }, [location.pathname, location.hash])
+
+  // Lock page scroll while the mobile drawer is open.
+  useEffect(() => {
+    if (collapsed || !isMobileViewport()) {
+      document.body.style.removeProperty('overflow')
+      return
+    }
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.removeProperty('overflow')
+    }
+  }, [collapsed])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (!collapsed && isMobileViewport()) closeSidebar()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [collapsed])
+
   async function onAddSubmit(e: FormEvent) {
     e.preventDefault()
     if (!user || addBusy) return
@@ -141,6 +187,34 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <div className="stage-blob stage-blob-a" />
         <div className="stage-blob stage-blob-b" />
       </div>
+
+      <header className="mobile-topbar">
+        <Link to="/" className="side-brand mobile-topbar-brand" title="AutoNews">
+          <BrandLogo />
+          <span className="brand-name">
+            AutoNews
+            <small>关键词订阅新闻</small>
+          </span>
+        </Link>
+        <button
+          type="button"
+          className="mobile-menu-btn"
+          aria-expanded={!collapsed}
+          aria-controls="side-nav"
+          title="打开侧边栏"
+          onClick={openSidebar}
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
+      </header>
+
+      <button
+        type="button"
+        className="sidebar-scrim"
+        aria-label="关闭侧边栏"
+        tabIndex={collapsed ? -1 : 0}
+        onClick={closeSidebar}
+      />
 
       <aside className="sidebar" aria-label="主导航">
         <div className="sidebar-body">
@@ -331,7 +405,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <button
           type="button"
           className="side-toggle"
-          onClick={() => setCollapsed((v) => !v)}
+          onClick={toggleSidebar}
           aria-expanded={!collapsed}
           aria-controls="side-nav"
           title={collapsed ? '展开侧边栏' : '收起侧边栏'}
