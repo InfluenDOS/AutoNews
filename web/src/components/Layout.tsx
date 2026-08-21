@@ -1,8 +1,15 @@
 import { Link, NavLink } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const { user, signOut, configured } = useAuth()
+  const { showToast } = useToast()
+
+  async function onSignOut() {
+    await signOut()
+    showToast('已退出登录', 'info')
+  }
 
   return (
     <div className="app-shell">
@@ -28,7 +35,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           {!user ? (
             <NavLink to="/auth">登录 / 注册</NavLink>
           ) : (
-            <button type="button" className="side-logout" onClick={() => void signOut()}>
+            <button type="button" className="side-logout" onClick={() => void onSignOut()}>
               退出登录
             </button>
           )}

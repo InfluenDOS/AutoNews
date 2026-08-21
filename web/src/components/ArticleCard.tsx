@@ -19,9 +19,17 @@ type Props = {
   matchedKeywords?: string[]
   onToggleStar?: () => void
   canStar: boolean
+  starBusy?: boolean
 }
 
-export function ArticleCard({ article, starred, matchedKeywords, onToggleStar, canStar }: Props) {
+export function ArticleCard({
+  article,
+  starred,
+  matchedKeywords,
+  onToggleStar,
+  canStar,
+  starBusy = false,
+}: Props) {
   const title = (article.title_zh || '').trim() || article.title
   const summary = (article.summary_zh || '').trim() || article.summary
   const preview =
@@ -57,6 +65,7 @@ export function ArticleCard({ article, starred, matchedKeywords, onToggleStar, c
             <button
               type="button"
               className={`star-btn ${starred ? 'on' : ''}`}
+              disabled={starBusy}
               onClick={(e) => {
                 e.preventDefault()
                 onToggleStar()
@@ -64,7 +73,7 @@ export function ArticleCard({ article, starred, matchedKeywords, onToggleStar, c
               aria-label={starred ? '取消收藏' : '加入收藏'}
               title={starred ? '从收藏夹移除' : '加入收藏夹'}
             >
-              {starred ? '★' : '☆'}
+              {starBusy ? '…' : starred ? '★' : '☆'}
             </button>
           )}
         </div>

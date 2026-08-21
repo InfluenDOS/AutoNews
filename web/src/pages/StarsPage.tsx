@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArticleCard } from '../components/ArticleCard'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Article } from '../types'
 
@@ -12,9 +13,11 @@ type StarredRow = {
 
 export function StarsPage() {
   const { user } = useAuth()
+  const { showToast } = useToast()
   const [articles, setArticles] = useState<Article[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [starringId, setStarringId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!user || !isSupabaseConfigured) {
@@ -49,14 +52,21 @@ export function StarsPage() {
   }, [load])
 
   async function unstar(articleId: string) {
-    if (!user) return
+    if (!user || starringId) return
+    setStarringId(articleId)
     const { error: err } = await supabase
       .from('stars')
       .delete()
       .eq('user_id', user.id)
       .eq('article_id', articleId)
-    if (err) setError(err.message)
-    else setArticles((prev) => prev.filter((a) => a.id !== articleId))
+    if (err) {
+      setError(err.message)
+      showToast('取消收藏失败', 'error')
+    } else {
+      setArticles((prev) => prev.filter((a) => a.id !== articleId))
+      showToast('已取消收藏', 'ok')
+    }
+    setStarringId(null)
   }
 
   if (!user) {
@@ -97,6 +107,7 @@ export function StarsPage() {
               article={article}
               starred
               canStar
+              starBusy={starringId === article.id}
               onToggleStar={() => void unstar(article.id)}
             />
           ))}

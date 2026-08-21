@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Article } from '../types'
 
@@ -24,10 +25,12 @@ function readingMinutes(text: string) {
 export function ArticleDetailPage() {
   const { id } = useParams()
   const { user } = useAuth()
+  const { showToast } = useToast()
   const [article, setArticle] = useState<Article | null>(null)
   const [starred, setStarred] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [starBusy, setStarBusy] = useState(false)
 
   const load = useCallback(async () => {
     if (!id || !isSupabaseConfigured) {
@@ -64,23 +67,35 @@ export function ArticleDetailPage() {
   }, [load])
 
   async function toggleStar() {
-    if (!user || !article) return
+    if (!user || !article || starBusy) return
+    setStarBusy(true)
     if (starred) {
       const { error: err } = await supabase
         .from('stars')
         .delete()
         .eq('user_id', user.id)
         .eq('article_id', article.id)
-      if (err) setError(err.message)
-      else setStarred(false)
+      if (err) {
+        setError(err.message)
+        showToast('取消收藏失败', 'error')
+      } else {
+        setStarred(false)
+        showToast('已取消收藏', 'ok')
+      }
     } else {
       const { error: err } = await supabase.from('stars').insert({
         user_id: user.id,
         article_id: article.id,
       })
-      if (err) setError(err.message)
-      else setStarred(true)
+      if (err) {
+        setError(err.message)
+        showToast('收藏失败', 'error')
+      } else {
+        setStarred(true)
+        showToast('已加入收藏', 'ok')
+      }
     }
+    setStarBusy(false)
   }
 
   const title = useMemo(
@@ -130,9 +145,10 @@ export function ArticleDetailPage() {
             <button
               type="button"
               className={`star-btn wide ${starred ? 'on' : ''}`}
+              disabled={starBusy}
               onClick={() => void toggleStar()}
             >
-              {starred ? '★ 已收藏' : '☆ 收藏'}
+              {starBusy ? '处理中…' : starred ? '★ 已收藏' : '☆ 收藏'}
             </button>
           )}
         </div>
