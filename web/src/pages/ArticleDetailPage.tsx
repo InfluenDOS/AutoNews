@@ -176,7 +176,7 @@ export function ArticleDetailPage() {
         <div className="origin-card">
           <h2>原文出处</h2>
           <p>
-            本页为根据公开 RSS 标题与摘要改写的中文阅读版，便于家人快速了解，并非媒体全文转载。
+            本页为根据公开 RSS 标题与摘要改写的中文阅读版，并非媒体全文转载。
             完整报道与图片请打开原站。
           </p>
           <a className="btn btn-solid" href={article.url} target="_blank" rel="noopener noreferrer">
