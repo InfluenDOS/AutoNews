@@ -56,7 +56,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
             aria-label={collapsed ? '展开侧栏' : '收起侧栏'}
             title={collapsed ? '展开' : '收起'}
           >
-            <span aria-hidden="true">{collapsed ? '›' : '‹'}</span>
+            <span className="side-collapse-ico side-collapse-ico-desktop" aria-hidden="true">
+              {collapsed ? '›' : '‹'}
+            </span>
+            <span className="side-collapse-ico side-collapse-ico-mobile" aria-hidden="true">
+              {collapsed ? '☰' : '▴'}
+            </span>
           </button>
         </div>
 
