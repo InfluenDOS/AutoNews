@@ -376,6 +376,23 @@ code {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+.content-atmosphere {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(900px 420px at 88% -8%, rgba(127, 159, 122, 0.2), transparent 55%),
+    radial-gradient(720px 380px at 8% 100%, rgba(201, 133, 74, 0.12), transparent 52%),
+    linear-gradient(180deg, rgba(255, 250, 242, 0.35), transparent 28%);
+  z-index: 0;
+}
+
+.content-shell > *:not(.content-atmosphere) {
+  position: relative;
+  z-index: 1;
 }
 
 .feed-terms {
@@ -565,12 +582,12 @@ input:focus {
   border-radius: 20px;
   padding: 1rem 1.1rem;
   box-shadow: 0 6px 16px rgba(62, 48, 36, 0.04);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
 }
 
 .card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 24px rgba(62, 48, 36, 0.08);
+  transform: translateY(-3px);
+  box-shadow: 0 14px 28px rgba(62, 48, 36, 0.1);
 }
 
 .card-meta {
@@ -962,6 +979,198 @@ input:focus {
 .empty {
   padding: 2rem 1rem;
   text-align: center;
+}
+
+.hero-band {
+  position: relative;
+  height: clamp(140px, 22vw, 220px);
+  border-radius: 24px;
+  overflow: hidden;
+  margin-bottom: 1.1rem;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.hero-band-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transform: scale(1.04);
+  animation: kenburns 18s ease-in-out infinite alternate;
+}
+
+.hero-band-veil {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(36, 74, 61, 0.72), rgba(36, 74, 61, 0.28) 55%, rgba(36, 74, 61, 0.12)),
+    linear-gradient(180deg, transparent 40%, rgba(36, 48, 40, 0.35));
+}
+
+.hero-poem {
+  position: absolute;
+  left: 1.2rem;
+  bottom: 1rem;
+  right: 1.2rem;
+  max-width: 22rem;
+  margin: 0;
+  color: #f7f3ea;
+  animation: poem-fade 0.8s ease both;
+}
+
+.hero-poem blockquote {
+  margin: 0;
+}
+
+.hero-poem blockquote p {
+  margin: 0.1rem 0;
+  font-family: var(--font-serif);
+  font-size: clamp(1.05rem, 2.4vw, 1.35rem);
+  line-height: 1.55;
+  letter-spacing: 0.08em;
+}
+
+.hero-poem figcaption {
+  margin-top: 0.45rem;
+  font-size: 0.78rem;
+  opacity: 0.82;
+  font-family: var(--font-ui);
+}
+
+.poetry {
+  margin: 0;
+}
+
+.poetry-sidebar {
+  margin-top: 0.35rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  animation: poem-fade 0.9s ease both;
+}
+
+.poetry-sidebar blockquote {
+  margin: 0;
+}
+
+.poetry-sidebar blockquote p {
+  margin: 0.12rem 0;
+  font-family: var(--font-serif);
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
+  line-height: 1.55;
+  color: rgba(247, 243, 234, 0.95);
+}
+
+.poetry-sidebar figcaption {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+
+.poetry-panel {
+  margin: 1rem auto 0;
+  max-width: 22rem;
+  padding: 0.9rem 1rem;
+  border-radius: 16px;
+  background: rgba(255, 250, 242, 0.88);
+  border: 1px solid var(--line);
+}
+
+.poetry-panel blockquote p {
+  margin: 0.15rem 0;
+  font-family: var(--font-serif);
+  color: var(--forest-deep);
+  letter-spacing: 0.06em;
+}
+
+.poetry-panel figcaption {
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.poetry-inline {
+  margin: 0 auto 0.55rem;
+  max-width: 28rem;
+  text-align: center;
+  opacity: 0.85;
+}
+
+.poetry-inline blockquote p {
+  margin: 0.1rem 0;
+  display: inline;
+  font-family: var(--font-serif);
+  font-size: 0.92rem;
+  letter-spacing: 0.08em;
+  color: var(--forest-deep);
+}
+
+.poetry-inline blockquote p + p::before {
+  content: ' · ';
+  opacity: 0.5;
+}
+
+.poetry-inline figcaption {
+  margin-top: 0.25rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.empty-scenic {
+  display: grid;
+  gap: 1rem;
+  justify-items: center;
+  padding: 1.4rem 1rem 1.6rem;
+  background: rgba(255, 250, 242, 0.72);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+}
+
+.empty-photo {
+  width: min(100%, 420px);
+  height: 160px;
+  object-fit: cover;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+}
+
+.fade-rise {
+  animation: fade-rise 0.45s ease both;
+}
+
+@keyframes kenburns {
+  from {
+    transform: scale(1.02) translate3d(0, 0, 0);
+  }
+  to {
+    transform: scale(1.08) translate3d(-1.5%, -1%, 0);
+  }
+}
+
+@keyframes poem-fade {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (max-width: 900px) {

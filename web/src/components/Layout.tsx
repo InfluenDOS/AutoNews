@@ -3,6 +3,7 @@ import { Link, NavLink } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useKeywordWorkspace } from '../context/KeywordWorkspace'
 import { useToast } from '../context/ToastContext'
+import { PoetryOrnament } from './PoetryOrnament'
 import { Spinner } from './Spinner'
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -24,7 +25,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   async function onSignOut() {
     await signOut()
-    showToast('已退出登录', 'info')
+    showToast('您已安全退出', 'info')
   }
 
   async function onAdd(e: FormEvent) {
@@ -39,14 +40,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className={`app-shell${collapsed ? ' sidebar-collapsed' : ''}`}>
-      <aside className="sidebar" aria-label="关键词侧栏">
+      <aside className="sidebar" aria-label="专题导航">
         <div className="side-top">
-          <Link to="/" className="side-brand" title="AutoNews">
+          <Link to="/" className="side-brand" title="AutoNews 巴尔干时讯">
             <span className="side-logo">AN</span>
             {!collapsed && (
               <span>
                 <strong>AutoNews</strong>
-                <small>巴尔干关键词新闻</small>
+                <small>巴尔干时讯</small>
               </span>
             )}
           </Link>
@@ -63,12 +64,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
         {user ? (
           <div className="kw-rail">
-            {!collapsed && <p className="kw-rail-label">我的关键词</p>}
-            <div className="kw-rail-list" role="tablist" aria-label="关键词">
+            {!collapsed && <p className="kw-rail-label">我的专题</p>}
+            <div className="kw-rail-list" role="tablist" aria-label="专题列表">
               {kwLoading && keywords.length === 0 ? (
-                <p className="kw-rail-empty">{collapsed ? '…' : '加载中…'}</p>
+                <p className="kw-rail-empty">{collapsed ? '…' : '正在载入…'}</p>
               ) : keywords.length === 0 ? (
-                !collapsed && <p className="kw-rail-empty">还没有关键词</p>
+                !collapsed && <p className="kw-rail-empty">尚未创建专题</p>
               ) : (
                 keywords.map((k) => {
                   const pending = !(k.search_terms || []).length
@@ -92,7 +93,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                         <button
                           type="button"
                           className="kw-rail-del"
-                          title="删除关键词"
+                          title="移除专题"
                           disabled={saving}
                           onClick={() => void deleteKeyword(k.id)}
                         >
@@ -112,7 +113,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                     type="text"
                     value={phrase}
                     onChange={(e) => setPhrase(e.target.value)}
-                    placeholder="用中文描述关注点…"
+                    placeholder="用一句话描述关注主题…"
                     maxLength={200}
                     autoFocus
                     disabled={saving}
@@ -120,7 +121,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   />
                   <div className="kw-add-actions">
                     <button className="btn btn-sm" type="submit" disabled={saving}>
-                      {saving ? '提交中…' : '添加'}
+                      {saving ? '提交中…' : '创建'}
                     </button>
                     <button
                       className="btn btn-sm btn-ghost"
@@ -139,8 +140,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 <button
                   type="button"
                   className="kw-add-btn"
-                  title="新建关键词"
-                  aria-label="新建关键词"
+                  title="新建专题"
+                  aria-label="新建专题"
                   disabled={saving}
                   onClick={() => {
                     setCollapsed(false)
@@ -151,14 +152,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 </button>
               )}
             </div>
+
+            {!collapsed && <PoetryOrnament variant="sidebar" seed={7} />}
           </div>
         ) : (
           !collapsed && (
             <div className="kw-rail-guest">
-              <p>登录后可在侧栏管理关键词，并按关键词浏览新闻。</p>
+              <p>登录后即可创建专题，持续追踪巴尔干半岛要闻。</p>
               <NavLink className="btn btn-sm" to="/auth">
                 登录 / 注册
               </NavLink>
+              <PoetryOrnament variant="sidebar" seed={3} />
             </div>
           )
         )}
@@ -169,7 +173,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </NavLink>
           {user ? (
             <button type="button" className="side-logout" onClick={() => void onSignOut()}>
-              {collapsed ? '⎋' : '退出登录'}
+              {collapsed ? '⎋' : '退出'}
             </button>
           ) : (
             <NavLink to="/auth" title="登录">
@@ -180,12 +184,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="content-shell">
+        <div className="content-atmosphere" aria-hidden="true" />
         {!configured && (
-          <div className="banner warn">请先配置 Supabase，并完成数据库迁移。</div>
+          <div className="banner warn">服务尚未完成配置，请联系管理员完成初始化。</div>
         )}
-        <main className="main">{children}</main>
+        <main className="main fade-rise">{children}</main>
         <footer className="footer">
-          站内中文短讯 · 底部可打开原文 · 定时更新 · 不转载全文
+          <PoetryOrnament variant="inline" seed={11} />
+          <p>精选摘要 · 注明出处 · 定时更新 · 不转载全文</p>
         </footer>
       </div>
     </div>

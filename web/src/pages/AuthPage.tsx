@@ -64,8 +64,8 @@ export function AuthPage() {
 
   return (
     <section className="panel auth-panel">
-      <h1>{mode === 'signin' ? '登录' : '注册账号'}</h1>
-      <p className="muted">保存关键词、筛选巴尔干新闻，并将感兴趣的文章加入收藏夹。</p>
+      <h1>{mode === 'signin' ? '登录' : '注册'}</h1>
+      <p className="muted">创建专题、追踪巴尔干要闻，并将重要报道收入收藏夹。</p>
 
       <form className="form" onSubmit={onSubmit}>
         <label>

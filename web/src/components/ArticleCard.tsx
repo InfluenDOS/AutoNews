@@ -46,7 +46,7 @@ export function ArticleCard({
         <Link to={`/article/${article.id}`}>{title}</Link>
       </h2>
       {preview && <p className="card-summary">{preview}</p>}
-      {!translated && <p className="card-hint">等待 AI 翻译为中文</p>}
+      {!translated && <p className="card-hint">中文译本生成中</p>}
       <div className="card-actions">
         {matchedKeywords && matchedKeywords.length > 0 && (
           <div className="tags">
