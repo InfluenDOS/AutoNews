@@ -100,10 +100,10 @@ def article_matches(article: dict[str, Any], terms: list[str]) -> bool:
     if not terms:
         return False
     hay = f"{article.get('title', '')} {article.get('summary', '')}"
+    # Prefer pre-normalized text when present, but still enforce word boundaries.
     normalized = article.get("raw_text_normalized") or normalize_for_match(hay)
     for term in terms:
-        key = normalize_for_match(term)
-        if key and (key in normalized or matches_keyword(hay, term)):
+        if matches_keyword(normalized, term) or matches_keyword(hay, term):
             return True
     return False
 

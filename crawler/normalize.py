@@ -155,13 +155,30 @@ def normalize_for_match(text: str) -> str:
     return to_latin(text).casefold().strip()
 
 
+def _is_word_char(ch: str) -> bool:
+    return ch.isalnum()
+
+
 def matches_keyword(haystack: str, keyword: str) -> bool:
-    """Return True if keyword appears in haystack after Latin/Cyrillic normalization."""
+    """True if keyword appears as a whole token/phrase (not a substring of a longer word).
+
+    Prevents false friends like premijer (PM) matching inside premijera (premiere).
+    """
     h = normalize_for_match(haystack)
     k = normalize_for_match(keyword)
     if not k:
         return False
-    return k in h
+    start = 0
+    while True:
+        i = h.find(k, start)
+        if i < 0:
+            return False
+        before_ok = i == 0 or not _is_word_char(h[i - 1])
+        after = i + len(k)
+        after_ok = after >= len(h) or not _is_word_char(h[after])
+        if before_ok and after_ok:
+            return True
+        start = i + 1
 
 
 MATCH_STOPWORDS = {
@@ -203,6 +220,14 @@ BROAD_SINGLE_TERMS = {
     "vojska",
     "kultura",
     "sport",
+    # Political titles alone are noisy; also premijer ⊂ premijera (film premiere)
+    "premijer",
+    "premijerka",
+    "premijera",
+    "predsednik",
+    "predsednica",
+    "vlade",
+    "vlada",
 }
 
 
@@ -243,13 +268,7 @@ def expand_match_terms(phrase: str, search_terms: list[str] | None = None) -> li
 
 
 def article_matches_groups(haystack: str, terms: list[str]) -> bool:
-    """OR across precise terms."""
+    """OR across precise terms (word-boundary aware)."""
     if not terms:
         return False
-    for term in terms:
-        if matches_keyword(haystack, term):
-            return True
-        key = normalize_for_match(term)
-        if key and key in normalize_for_match(haystack):
-            return True
-    return False
+    return any(matches_keyword(haystack, term) for term in terms)
