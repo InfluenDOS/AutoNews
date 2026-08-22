@@ -7,7 +7,7 @@ import os
 from typing import Any
 
 from ai_client import ai_configured, chat_json
-from normalize import clean_match_groups
+from normalize import clean_match_groups, clean_exclude_terms
 
 # Cost knobs (override via env)
 BATCH_SIZE = int(os.environ.get("RELEVANCE_BATCH_SIZE", "12"))
@@ -17,42 +17,48 @@ RELEVANCE_SYSTEM = """你是新闻相关性审核员。根据用户的订阅意�
 只输出 JSON：{"results":[{"id":"文章id","relevant":true/false}]}
 
 规则：
-1. relevant=true：稿件主题确实在回答/覆盖用户意图的核心（多要素都要沾边）。
-2. relevant=false：仅有其中一个要素、擦边、同词异义、或完全另一话题。
+1. relevant=true：稿件主题确实在回答用户意图。要素可以是隐含的——若语境已经明确
+   （例如塞尔维亚媒体报道本国事务时不会重复写「塞尔维亚」），不要因为字面没出现就判否。
+2. relevant=false：主题另有所指、只是顺带提及、或命中的是同形异义词
+   （如 premijer 总理 vs premijera 首映、izbor 选择 vs izbori 选举、
+   Vlada 政府 vs 人名 Vladimir）。判断词义要看上下文，不要只看字面。
 3. 只依据给定的标题和摘要，不要臆造。
 4. results 必须覆盖用户给出的每一篇 id。"""
 
 
 def needs_stage2(row: dict[str, Any]) -> bool:
-    """Strict / multi-facet keywords get LLM confirmation."""
+    """Multi-facet keywords, and any keyword with sense guards, get LLM confirmation."""
     mode = (row.get("match_mode") or "").strip()
     groups = clean_match_groups(row.get("match_groups"))
-    if mode == "strict" and len(groups) >= 2:
-        return True
     if len(groups) >= 2:
         return True
-    return False
+    if mode == "strict" and groups:
+        return True
+    return bool(clean_exclude_terms(row.get("exclude_terms")))
 
 
 def stage1_match(article: dict[str, Any], row: dict[str, Any]) -> bool:
-    """Broad recall for stage-2 keywords; otherwise normal keyword row match."""
-    from normalize import (
-        article_matches_keyword_row,
-        haystack_for_article,
-        phrase_hits,
-    )
+    """Wider candidate net for stage-2 keywords; otherwise the normal keyword row match."""
+    from normalize import article_matches_keyword_row
 
-    groups = clean_match_groups(row.get("match_groups"))
-    if needs_stage2(row) and groups:
-        hay, norm = haystack_for_article(article)
-        # At least half of facet groups (wider than full AND, cheaper than full OR)
-        hits = 0
-        for g in groups:
-            if any(phrase_hits(hay, norm, alt) for alt in g):
-                hits += 1
-        need = max(1, (len(groups) + 1) // 2)
-        return hits >= need
+    return article_matches_keyword_row(article, row, recall=needs_stage2(row))
 
+
+def rule_confident(match: dict[str, Any]) -> bool:
+    """Does this stage-1 candidate already satisfy the tight (non-recall) rule match?
+
+    Used as the fallback when the LLM budget runs out, so a confident rule hit still
+    reaches the feed instead of being silently dropped.
+    """
+    from normalize import article_matches_keyword_row
+
+    article = {"title": match.get("title") or "", "summary": match.get("summary") or ""}
+    row = {
+        "phrase": match.get("keyword_phrase") or "",
+        "match_mode": match.get("match_mode") or "",
+        "match_groups": match.get("match_groups"),
+        "exclude_terms": match.get("exclude_terms"),
+    }
     return article_matches_keyword_row(article, row)
 
 
@@ -99,7 +105,7 @@ def save_relevance(sb: Any, rows: list[dict[str, Any]]) -> None:
 
 
 def score_batch(
-    phrase: str, items: list[dict[str, str]]
+    phrase: str, items: list[dict[str, str]], *, avoid: list[str] | None = None
 ) -> dict[str, bool]:
     """items: [{id, title, summary}] -> id -> relevant."""
     if not items:
@@ -110,6 +116,7 @@ def score_batch(
 
     payload = {
         "intent": phrase,
+        "wrong_sense_terms": avoid or [],
         "articles": [
             {
                 "id": it["id"],
@@ -176,18 +183,19 @@ def filter_matches_with_relevance(
     new_rows: list[dict[str, Any]] = []
     for kid, items in pending_by_kw.items():
         if scored >= MAX_SCORE_PER_RUN:
-            # Budget exhausted: drop unscored stage-2 (don't pollute feed)
+            # Budget exhausted: fall back to the tight rule match rather than dropping.
             for m in items:
-                decided[(m["keyword_id"], m["article_id"])] = False
+                decided[(m["keyword_id"], m["article_id"])] = rule_confident(m)
             continue
         phrase = items[0]["keyword_phrase"]
+        avoid = clean_exclude_terms(items[0].get("exclude_terms"))
         # unique articles
         by_aid = {m["article_id"]: m for m in items}
         unique = list(by_aid.values())
         for i in range(0, len(unique), BATCH_SIZE):
             if scored >= MAX_SCORE_PER_RUN:
                 for m in unique[i:]:
-                    decided[(kid, m["article_id"])] = False
+                    decided[(kid, m["article_id"])] = rule_confident(m)
                 break
             chunk = unique[i : i + BATCH_SIZE]
             remain = MAX_SCORE_PER_RUN - scored
@@ -201,7 +209,7 @@ def filter_matches_with_relevance(
                 for m in chunk
             ]
             try:
-                result = score_batch(phrase, batch_in)
+                result = score_batch(phrase, batch_in, avoid=avoid)
             except Exception as exc:  # noqa: BLE001
                 print(f"relevance batch failed for {kid}: {exc}")
                 result = {m["article_id"]: True for m in chunk}  # fail open once

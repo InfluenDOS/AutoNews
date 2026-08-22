@@ -21,6 +21,7 @@ export type Keyword = {
   search_terms?: string[]
   match_groups?: string[][]
   match_mode?: 'loose' | 'strict'
+  exclude_terms?: string[]
   ai_note?: string
   created_at: string
 }

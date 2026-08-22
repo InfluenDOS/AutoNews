@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test:match": "node --experimental-strip-types scripts/normalize.parity.ts",
     "preview": "vite preview"
   },
   "dependencies": {
