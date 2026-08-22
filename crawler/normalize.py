@@ -204,16 +204,25 @@ _SR_SUFFIXES = (
     "o",
 )
 
-# Query token → haystack full-forms that must NOT count as a hit (false friends).
+# Query token → exact haystack forms that must NOT count as a hit (false friends).
+# Matched exactly: `izbori` must still reach `izborni` (electoral), just not `izbor` (a choice).
+# Only unambiguous wrong-sense forms belong here. `izbora` and `izboru` are left out on
+# purpose: they are the ordinary way to write "of/at the elections" (datum izbora), so
+# blocking them would cost more than the occasional "depending on your selection". Cases
+# that need real context are handled by the AI's exclude_terms and the stage-2 pass.
 _FALSE_FRIEND_HITS = {
+    # premijer = prime minister; premijera = film premiere
     "premijer": frozenset({"premijera"}),
     "premijerka": frozenset({"premijera"}),
-    # izbor = "choice/selection"; izbori / izbore / … = "elections"
+    # izbor = "choice/selection"; izbori / izbore / izborni = "elections"
     "izbori": frozenset({"izbor"}),
     "izbore": frozenset({"izbor"}),
     "izborima": frozenset({"izbor"}),
     "izborite": frozenset({"izbor"}),
 }
+
+
+_MIN_STEM = 4
 
 
 def light_stem(word: str) -> str:
@@ -222,9 +231,42 @@ def light_stem(word: str) -> str:
     if len(w) < 5:
         return w
     for suf in _SR_SUFFIXES:
-        if w.endswith(suf) and len(w) - len(suf) >= 4:
+        if w.endswith(suf) and len(w) - len(suf) >= _MIN_STEM:
             return w[: -len(suf)]
     return w
+
+
+_VOWELS = frozenset("aeiou")
+
+
+def _drop_fugitive_a(form: str) -> str | None:
+    """Serbian «nepostojano a»: migranat → migrant, sastanak → sastank."""
+    if len(form) < 5 or form[-1] in _VOWELS or form[-2] != "a" or form[-3] in _VOWELS:
+        return None
+    return form[:-2] + form[-1]
+
+
+def stem_candidates(word: str) -> set[str]:
+    """Word plus every form obtained by stripping ONE known inflectional ending.
+
+    Two words are treated as the same lemma when their candidate sets overlap.
+    Unlike prefix matching this refuses `vlada`→`Vladimir` / `kineski`→`kinematografija`,
+    because the extra characters must be a recognised Serbian ending.
+    """
+    w = normalize_for_match(word)
+    if not w:
+        return set()
+    out = {w}
+    if len(w) < 5:
+        return out
+    for suf in _SR_SUFFIXES:
+        if w.endswith(suf) and len(w) - len(suf) >= _MIN_STEM:
+            out.add(w[: -len(suf)])
+    for form in list(out):
+        collapsed = _drop_fugitive_a(form)
+        if collapsed and len(collapsed) >= _MIN_STEM:
+            out.add(collapsed)
+    return out
 
 
 def _haystack_words(haystack: str) -> list[str]:
@@ -246,9 +288,7 @@ def _is_false_friend(query_token: str, hay_word: str) -> bool:
     q = normalize_for_match(query_token)
     w = normalize_for_match(hay_word)
     blocked = _FALSE_FRIEND_HITS.get(q) or _FALSE_FRIEND_HITS.get(light_stem(q))
-    if not blocked:
-        return False
-    return w in blocked or any(w.startswith(b) and w != q for b in blocked)
+    return bool(blocked) and w in blocked
 
 
 def matches_token(haystack: str, token: str) -> bool:
@@ -259,21 +299,15 @@ def matches_token(haystack: str, token: str) -> bool:
     # Exact whole-token match first
     if matches_keyword_exact(haystack, t):
         return True
-    stem = light_stem(t)
-    if len(stem) < 4:
+    t_forms = {c for c in stem_candidates(t) if len(c) >= _MIN_STEM}
+    if not t_forms:
         return False
     for word in _haystack_words(haystack):
         if _is_false_friend(t, word):
             continue
         if word == t:
             return True
-        w_stem = light_stem(word)
-        if w_stem == stem:
-            return True
-        # izbor* family: izbori / izbore / izborima / izborna
-        if len(stem) >= 4 and (word.startswith(stem) or stem.startswith(w_stem) and len(w_stem) >= 4):
-            if _is_false_friend(t, word):
-                continue
+        if t_forms & {c for c in stem_candidates(word) if len(c) >= _MIN_STEM}:
             return True
     return False
 
@@ -326,11 +360,79 @@ def content_tokens(term: str) -> list[str]:
     return [p for p in parts if p and p not in MATCH_STOPWORDS]
 
 
+# A domestic newsroom does not repeat its own country: an AI term like "izbori u Srbiji"
+# has to match the headline "prvo su tražili izbore".
+_IMPLIED_LOCATION_STEMS = ("srbij", "serbia", "serbian", "balkan", "beograd", "belgrad")
+
+# …but only when the story is not about somewhere else instead.
+_OTHER_COUNTRIES = (
+    "Hrvatska",
+    "Croatia",
+    "Bosna",
+    "Bosnia",
+    "Hercegovina",
+    "Crna Gora",
+    "Montenegro",
+    "Makedonija",
+    "Macedonia",
+    "Slovenija",
+    "Slovenia",
+    "Kosovo",
+    "Albanija",
+    "Albania",
+    "Bugarska",
+    "Bulgaria",
+    "Rumunija",
+    "Romania",
+    "Mađarska",
+    "Madjarska",
+    "Hungary",
+    "Grčka",
+    "Greece",
+    "Turska",
+    "Turkey",
+    "Rusija",
+    "Russia",
+    "Ukrajina",
+    "Ukraine",
+    "Nemačka",
+    "Germany",
+    "Francuska",
+    "France",
+    "Italija",
+    "Italy",
+    "Austrija",
+    "Austria",
+    "Poljska",
+    "Poland",
+)
+
+
+def _is_implied_location(token: str) -> bool:
+    t = normalize_for_match(token)
+    return any(t.startswith(stem) for stem in _IMPLIED_LOCATION_STEMS)
+
+
+def mentions_other_country(haystack: str, allowed_tokens: list[str]) -> bool:
+    """True if the text names a country the search term did not ask for."""
+    allowed = {normalize_for_match(t) for t in allowed_tokens}
+    for country in _OTHER_COUNTRIES:
+        toks = content_tokens(country)
+        if not toks or any(t in allowed for t in toks):
+            continue
+        if matches_keyword_exact(haystack, country) or all(
+            matches_token(haystack, t) for t in toks
+        ):
+            return True
+    return False
+
+
 def matches_keyword(haystack: str, keyword: str) -> bool:
     """True if keyword matches haystack, with inflection + multi-word AND fallback.
 
     - Contiguous phrase with word boundaries (preferred)
     - Else all content tokens match via light stemming (handles izbori→izbore)
+    - A local-location token may be implied, unless the story names another country
     - Guards false friends like premijer vs premijera
     """
     k = normalize_for_match(keyword)
@@ -338,18 +440,26 @@ def matches_keyword(haystack: str, keyword: str) -> bool:
         return False
     if matches_keyword_exact(haystack, k):
         return True
-    toks = content_tokens(k)
-    if not toks:
-        return False
     # Year-only leftovers are useless
-    toks = [t for t in toks if not t.isdigit()]
+    toks = [t for t in content_tokens(k) if not t.isdigit()]
     if not toks:
         return False
-    return all(matches_token(haystack, t) for t in toks)
+    missing = [t for t in toks if not matches_token(haystack, t)]
+    if not missing:
+        return True
+    if not all(_is_implied_location(t) for t in missing):
+        return False
+    # Implying the country is only safe when something distinctive did match: `vlada` alone
+    # would otherwise pull in the given name Vlado, `premijer` alone any prime minister.
+    present = [t for t in toks if t not in missing]
+    if not any(t not in GENERIC_TERMS for t in present):
+        return False
+    return not mentions_other_country(haystack, toks)
 
 
-# Too broad alone — cause false positives (any migrant story, any China mention, etc.)
-BROAD_SINGLE_TERMS = {
+# Generic on their own: they describe a whole beat, not a story. They are kept as
+# search terms but weighted down, so they can narrow a match without carrying one.
+GENERIC_TERMS = {
     "kina",
     "kineski",
     "kineska",
@@ -402,6 +512,52 @@ BROAD_SINGLE_TERMS = {
 }
 
 
+WEIGHT_PHRASE = 1.0
+WEIGHT_DISTINCTIVE = 0.8
+WEIGHT_SHORT = 0.5
+WEIGHT_GENERIC = 0.3
+
+# A term at or above this weight is specific enough to justify a hit on its own.
+SELF_SUFFICIENT_WEIGHT = WEIGHT_SHORT
+# Share of total facet weight an article must cover.
+MIN_COVERAGE = 0.6
+RECALL_MIN_COVERAGE = 0.45
+
+
+def term_weight(term: str) -> float:
+    """How much evidence one search term carries. Phrases beat bare generic words."""
+    toks = [t for t in content_tokens(term) if not t.isdigit()]
+    if not toks:
+        return 0.0
+    if len(toks) >= 2:
+        return WEIGHT_PHRASE
+    tok = toks[0]
+    if tok in GENERIC_TERMS:
+        return WEIGHT_GENERIC
+    if len(tok) >= 5:
+        return WEIGHT_DISTINCTIVE
+    return WEIGHT_SHORT
+
+
+def facet_weight(group: list[str]) -> float:
+    """A facet is as specific as its most specific language variant."""
+    return max((term_weight(alt) for alt in group), default=0.0)
+
+
+def allowed_facet_misses(count: int) -> int:
+    """How many facets an article may leave implicit.
+
+    AI over-decomposes long intents, and newsrooms imply context instead of spelling it
+    out, so full AND across every facet rejects obviously on-topic stories. Two facets
+    stay mandatory because there is nothing left to corroborate a single hit.
+    """
+    if count <= 2:
+        return 0
+    if count <= 4:
+        return 1
+    return 2
+
+
 def expand_match_terms(phrase: str, search_terms: list[str] | None = None) -> list[str]:
     """Build match terms. Keep AI phrases; also emit distinctive content cores."""
     raw = [t.strip() for t in (search_terms or []) if str(t).strip()]
@@ -415,9 +571,6 @@ def expand_match_terms(phrase: str, search_terms: list[str] | None = None) -> li
             return
         if key.isdigit():
             return
-        # Reject broad single tokens
-        if " " not in term.strip() and key in BROAD_SINGLE_TERMS:
-            return
         seen.add(key)
         out.append(term.strip())
 
@@ -426,22 +579,8 @@ def expand_match_terms(phrase: str, search_terms: list[str] | None = None) -> li
         # If a phrase collapses to one distinctive content token (e.g. "izbori u Srbiji" → izbori),
         # keep that core so inflected headlines match without dragging in noisy words like "proces".
         cores = [t for t in content_tokens(term) if not t.isdigit()]
-        if len(cores) == 1 and len(cores[0]) >= 5 and cores[0] not in BROAD_SINGLE_TERMS:
+        if len(cores) == 1 and len(cores[0]) >= 5 and cores[0] not in GENERIC_TERMS:
             add(cores[0])
-
-    # If AI only gave broad singles, keep the most specific multi-word-looking combos
-    # by pairing china-ish + migrant-ish when possible.
-    if not out and raw:
-        china = [
-            t
-            for t in raw
-            if normalize_for_match(t) in {"kina", "kineski", "chinese", "china"}
-            or "kines" in normalize_for_match(t)
-        ]
-        migr = [t for t in raw if any(x in normalize_for_match(t) for x in ("migr", "imigr", "ilegal"))]
-        for c in china[:2]:
-            for m in migr[:2]:
-                add(f"{c} {m}")
 
     if not out:
         # Last resort: original user phrase (may be Chinese — then crawl will find nothing until AI expands well)
@@ -451,7 +590,12 @@ def expand_match_terms(phrase: str, search_terms: list[str] | None = None) -> li
 
 
 def clean_match_groups(raw: Any) -> list[list[str]]:
-    """Normalize AI/DB match_groups into [[variant, …], …]."""
+    """Normalize AI/DB match_groups into [[variant, …], …].
+
+    Generic single words are kept: dropping them used to delete whole facets such as
+    ["Srbija", "Serbia"], which both widened the match and pushed the facet count below
+    the two needed to keep strict mode alive.
+    """
     if not isinstance(raw, list):
         return []
     groups: list[list[str]] = []
@@ -467,13 +611,27 @@ def clean_match_groups(raw: Any) -> list[list[str]]:
             key = normalize_for_match(s)
             if not key or key in seen or key.isdigit() or key in MATCH_STOPWORDS:
                 continue
-            if " " not in s and key in BROAD_SINGLE_TERMS:
-                continue
             seen.add(key)
             cleaned.append(s[:80])
         if cleaned:
             groups.append(cleaned[:12])
     return groups[:6]
+
+
+def clean_exclude_terms(raw: Any) -> list[str]:
+    """Wrong-sense terms that veto a match (e.g. `premijera` for a `premijer` intent)."""
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        s = str(item).strip()
+        key = normalize_for_match(s)
+        if not key or key in seen or key.isdigit() or key in MATCH_STOPWORDS:
+            continue
+        seen.add(key)
+        out.append(s[:80])
+    return out[:12]
 
 
 def suggest_match_mode(phrase: str) -> str:
@@ -495,38 +653,84 @@ def phrase_hits(hay: str, normalized: str, phrase: str) -> bool:
     return matches_keyword(normalized, phrase) or matches_keyword(hay, phrase)
 
 
-def article_matches_loose(article: dict[str, Any], terms: list[str]) -> bool:
-    """OR across precise terms (inflection-aware)."""
+def score_facets(
+    article: dict[str, Any],
+    groups: list[list[str]],
+    *,
+    recall: bool = False,
+) -> tuple[bool, float]:
+    """Weighted facet coverage. Returns (matched, coverage).
+
+    OR within a facet (language variants), weighted partial AND across facets. `recall`
+    widens this into the stage-1 candidate net that the LLM pass then confirms.
+    """
+    groups = [g for g in groups if g]
+    if not groups:
+        return False, 0.0
+    hay, normalized = haystack_for_article(article)
+    weights = [facet_weight(g) for g in groups]
+    hits = [any(phrase_hits(hay, normalized, alt) for alt in g) for g in groups]
+
+    total = sum(weights)
+    if total <= 0:
+        return False, 0.0
+    coverage = sum(w for w, h in zip(weights, hits) if h) / total
+
+    misses = allowed_facet_misses(len(groups)) + (1 if recall else 0)
+    need = max(1, len(groups) - misses)
+    if sum(hits) < need:
+        return False, coverage
+    if coverage < (RECALL_MIN_COVERAGE if recall else MIN_COVERAGE):
+        return False, coverage
+    if not recall:
+        # The single most specific facet is the intent's anchor; without it the rest is context.
+        anchor = weights.index(max(weights))
+        if not hits[anchor]:
+            return False, coverage
+    return True, coverage
+
+
+def score_terms(article: dict[str, Any], terms: list[str]) -> bool:
+    """OR across terms, but a bare generic word cannot carry the match by itself.
+
+    A long intent that expanded into `["izbori u Srbiji", "Srbija"]` used to match every
+    story mentioning Serbia. Generic terms are only consulted when the keyword has
+    nothing more specific — i.e. the user really did subscribe to a whole beat.
+    """
+    terms = [t for t in terms if t and t.strip()]
     if not terms:
         return False
     hay, normalized = haystack_for_article(article)
-    return any(phrase_hits(hay, normalized, term) for term in terms)
+    specific = [t for t in terms if term_weight(t) >= SELF_SUFFICIENT_WEIGHT]
+    pool = specific or terms
+    return any(phrase_hits(hay, normalized, term) for term in pool)
 
 
-def article_matches_strict(article: dict[str, Any], groups: list[list[str]]) -> bool:
-    """AND across groups; OR within each group (language variants)."""
-    if not groups:
+def article_excluded(article: dict[str, Any], row: dict[str, Any]) -> bool:
+    """True when the article hits a wrong-sense term the expansion flagged."""
+    excludes = clean_exclude_terms(row.get("exclude_terms"))
+    if not excludes:
         return False
     hay, normalized = haystack_for_article(article)
-    for group in groups:
-        if not group:
-            return False
-        if not any(phrase_hits(hay, normalized, alt) for alt in group):
-            return False
-    return True
+    return any(phrase_hits(hay, normalized, term) for term in excludes)
 
 
-def article_matches_keyword_row(article: dict[str, Any], row: dict[str, Any]) -> bool:
-    """Match one user keyword using strict groups or loose terms."""
+def article_matches_keyword_row(
+    article: dict[str, Any], row: dict[str, Any], *, recall: bool = False
+) -> bool:
+    """Match one user keyword using weighted facets or scored loose terms."""
+    if article_excluded(article, row):
+        return False
     mode = (row.get("match_mode") or "").strip() or suggest_match_mode(row.get("phrase") or "")
     groups = clean_match_groups(row.get("match_groups"))
-    if mode == "strict" and groups:
-        return article_matches_strict(article, groups)
+    if groups and (mode == "strict" or len(groups) >= 2):
+        matched, _ = score_facets(article, groups, recall=recall)
+        return matched
     terms = expand_match_terms(row.get("phrase") or "", row.get("search_terms") or [])
     # If AI returned groups but mode loose, still allow OR of flattened variants
     if not terms and groups:
         terms = [alt for g in groups for alt in g]
-    return article_matches_loose(article, terms)
+    return score_terms(article, terms)
 
 
 # Backward-compatible alias
