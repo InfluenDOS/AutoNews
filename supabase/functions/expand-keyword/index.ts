@@ -5,21 +5,33 @@ const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const EXPAND_SYSTEM = `你是巴尔干多语种新闻检索助手。用户用中文描述订阅意图。
+// Keep in sync with EXPAND_VERSION in crawler/process_ai.py.
+const EXPAND_VERSION = 2
+
+const EXPAND_SYSTEM = `你是巴尔干多语种新闻检索助手。用户用中文描述订阅意图，你输出用于匹配当地媒体原文的检索结构。
 只输出 JSON：
-{"match_mode":"loose|strict","match_groups":[["variantA","variantB"]],"search_terms":["phrase"],"ai_note":"一句中文"}
+{"match_mode":"loose|strict","match_groups":[["variantA","variantB"]],"search_terms":["phrase"],"exclude_terms":["wrongSense"],"ai_note":"一句中文"}
 
 硬性规则：
-1. match_groups/search_terms 必须是目标媒体原文（塞语拉丁字母/英语等），严禁中文。
-2. 短话题→loose，6～10个多词 search_terms。
-3. 多要素长意图→strict，2～4组 match_groups（组间AND，组内OR）。
-   例：[["kineski","Chinese","Kinezi"],["ilegalni migranti","illegal migrants"],["Srbija","Serbia"]]。
-4. 不要把过宽单词单独成组。ai_note用中文；不要Markdown。`
+1. 一律用目标媒体原文（塞/克/波语拉丁字母、英语），严禁中文。
+2. 每个词都要带常见变格形式：Srbija/Srbiji/Srbijom、kineski/kineskih/kineska。
+3. 消歧优先。若某词在当地语言里多义、或与人名/常用词同形，不要单独给出：
+   要么写成消歧的多词短语（用 vlada Srbije 而不是裸 vlada，因为 vlad- 会撞 Vladimir），
+   要么把错误义项放进 exclude_terms（意图是 premijer 总理时，exclude_terms 放 premijera 首映）。
+4. 短话题（1～2个要素）→ match_mode=loose，search_terms 给 6～10 条，优先多词短语；
+   只有用户确实想订阅整个大领域（如「塞尔维亚新闻」）时才给裸单词。
+5. 多要素长意图 → match_mode=strict，match_groups 给 2～4 组核心要素
+   （组内是同一要素的多语言/多变格写法，组间要求「基本都要沾边」）。
+6. 只拆真正的核心要素。当地媒体不会逐字重复的语境（本国国名、显而易见的地点）最多占一组；
+   程序性细节（被拘留、召开会议、表示关切）不要单独成组，融进要素短语里。
+7. 组数宁少勿多：2～3 组能表达就不要凑到 4 组。
+8. ai_note 用一句中文说明你如何理解该意图；不要 Markdown。`
 
 type ExpandResult = {
   match_mode: 'strict' | 'loose'
   match_groups: string[][]
   search_terms: string[]
+  exclude_terms: string[]
   ai_note: string
 }
 
@@ -111,40 +123,47 @@ async function chatJson(system: string, user: string): Promise<Record<string, un
   return parseJsonObject(String(content))
 }
 
+function cleanTerms(raw: unknown, limit: number): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    const s = String(item ?? '').trim()
+    if (!s) continue
+    const key = s.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(s.slice(0, 80))
+  }
+  return out.slice(0, limit)
+}
+
 function normalizeExpand(phrase: string, data: Record<string, unknown>): ExpandResult {
   const suggested = suggestMatchMode(phrase)
   const groups = cleanGroups(data.match_groups)
-  const termsRaw = Array.isArray(data.search_terms)
-    ? data.search_terms.map((t) => String(t).trim()).filter(Boolean)
-    : []
+  const termsRaw = cleanTerms(data.search_terms, 12)
+  const excludes = cleanTerms(data.exclude_terms, 12)
+  const aiNote = String(data.ai_note || '').trim().slice(0, 300)
   const aiMode = String(data.match_mode || '').trim()
   const wantStrict = (aiMode === 'strict' || suggested === 'strict') && groups.length >= 2
 
   if (wantStrict) {
-    const flat: string[] = []
-    const seen = new Set<string>()
-    for (const g of groups) {
-      for (const alt of g) {
-        const key = alt.toLowerCase()
-        if (!seen.has(key)) {
-          seen.add(key)
-          flat.push(alt)
-        }
-      }
-    }
+    const flat = cleanTerms(groups.flat(), 12)
     return {
       match_mode: 'strict',
       match_groups: groups,
-      search_terms: (flat.length ? flat : termsRaw).slice(0, 12),
-      ai_note: String(data.ai_note || '').trim().slice(0, 300),
+      search_terms: flat.length ? flat : termsRaw,
+      exclude_terms: excludes,
+      ai_note: aiNote,
     }
   }
 
   return {
     match_mode: 'loose',
     match_groups: [],
-    search_terms: (termsRaw.length ? termsRaw : [phrase]).slice(0, 12),
-    ai_note: String(data.ai_note || '').trim().slice(0, 300),
+    search_terms: termsRaw.length ? termsRaw : [phrase],
+    exclude_terms: excludes,
+    ai_note: aiNote,
   }
 }
 
@@ -375,16 +394,22 @@ Deno.serve(async (req) => {
         expandedPayload = normalizeExpand(phrase, raw)
         const normalized = expandedPayload.search_terms.join(' ').slice(0, 2000) || phrase
 
-        const { error: updErr } = await admin
-          .from('keywords')
-          .update({
-            search_terms: expandedPayload.search_terms,
-            match_groups: expandedPayload.match_groups,
-            match_mode: expandedPayload.match_mode,
-            ai_note: expandedPayload.ai_note,
-            normalized_phrase: normalized,
-          })
-          .eq('id', keywordId)
+        const patch: Record<string, unknown> = {
+          search_terms: expandedPayload.search_terms,
+          match_groups: expandedPayload.match_groups,
+          match_mode: expandedPayload.match_mode,
+          exclude_terms: expandedPayload.exclude_terms,
+          expand_version: EXPAND_VERSION,
+          ai_note: expandedPayload.ai_note,
+          normalized_phrase: normalized,
+        }
+        let { error: updErr } = await admin.from('keywords').update(patch).eq('id', keywordId)
+        if (updErr) {
+          // Migration 013 may not be applied yet; still save the terms.
+          delete patch.exclude_terms
+          delete patch.expand_version
+          ;({ error: updErr } = await admin.from('keywords').update(patch).eq('id', keywordId))
+        }
 
         if (updErr) throw updErr
 
@@ -426,6 +451,7 @@ Deno.serve(async (req) => {
         match_mode: expandedPayload?.match_mode,
         search_terms: expandedPayload?.search_terms,
         match_groups: expandedPayload?.match_groups,
+        exclude_terms: expandedPayload?.exclude_terms,
         crawl,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
