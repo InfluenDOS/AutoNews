@@ -194,23 +194,71 @@ const SR_SUFFIXES = [
   'o',
 ] as const
 
+/**
+ * Query token → exact haystack forms that must NOT count as a hit (false friends).
+ * Matched exactly: `izbori` must still reach `izborni` (electoral), just not `izbor` (a choice).
+ *
+ * Only unambiguous wrong-sense forms belong here. `izbora` and `izboru` are left out on
+ * purpose: they are the ordinary way to write "of/at the elections" (datum izbora), so
+ * blocking them would cost more than the occasional "depending on your selection". Cases
+ * that need real context are handled by the AI's exclude_terms and the stage-2 pass.
+ */
 const FALSE_FRIEND_HITS: Record<string, ReadonlySet<string>> = {
+  // premijer = prime minister; premijera = film premiere
   premijer: new Set(['premijera']),
   premijerka: new Set(['premijera']),
-  // izbor = "choice/selection"; izbori / izbore / … = "elections"
+  // izbor = "choice/selection"; izbori / izbore / izborni = "elections"
   izbori: new Set(['izbor']),
   izbore: new Set(['izbor']),
   izborima: new Set(['izbor']),
   izborite: new Set(['izbor']),
 }
 
+const MIN_STEM = 4
+
 function lightStem(word: string): string {
   const w = normalizeForMatch(word)
   if (w.length < 5) return w
   for (const suf of SR_SUFFIXES) {
-    if (w.endsWith(suf) && w.length - suf.length >= 4) return w.slice(0, -suf.length)
+    if (w.endsWith(suf) && w.length - suf.length >= MIN_STEM) return w.slice(0, -suf.length)
   }
   return w
+}
+
+/**
+ * Word plus every form obtained by stripping ONE known inflectional ending.
+ * Two words are the same lemma when their candidate sets overlap. Unlike prefix
+ * matching this refuses `vlada`→`Vladimir` / `kineski`→`kinematografija`.
+ */
+const VOWELS = new Set(['a', 'e', 'i', 'o', 'u'])
+
+/** Serbian «nepostojano a»: migranat → migrant, sastanak → sastank. */
+function dropFugitiveA(form: string): string | null {
+  if (form.length < 5) return null
+  if (VOWELS.has(form.slice(-1)) || form.slice(-2, -1) !== 'a' || VOWELS.has(form.slice(-3, -2))) {
+    return null
+  }
+  return form.slice(0, -2) + form.slice(-1)
+}
+
+function stemCandidates(word: string): Set<string> {
+  const w = normalizeForMatch(word)
+  const out = new Set<string>()
+  if (!w) return out
+  out.add(w)
+  if (w.length < 5) return out
+  for (const suf of SR_SUFFIXES) {
+    if (w.endsWith(suf) && w.length - suf.length >= MIN_STEM) out.add(w.slice(0, -suf.length))
+  }
+  for (const form of [...out]) {
+    const collapsed = dropFugitiveA(form)
+    if (collapsed && collapsed.length >= MIN_STEM) out.add(collapsed)
+  }
+  return out
+}
+
+function longEnough(forms: Set<string>): string[] {
+  return [...forms].filter((f) => f.length >= MIN_STEM)
 }
 
 function haystackWords(haystack: string): string[] {
@@ -230,10 +278,8 @@ function haystackWords(haystack: string): string[] {
 
 function isFalseFriend(queryToken: string, hayWord: string): boolean {
   const q = normalizeForMatch(queryToken)
-  const w = normalizeForMatch(hayWord)
   const blocked = FALSE_FRIEND_HITS[q] || FALSE_FRIEND_HITS[lightStem(q)]
-  if (!blocked) return false
-  return blocked.has(w) || [...blocked].some((b) => w.startsWith(b) && w !== q)
+  return blocked ? blocked.has(normalizeForMatch(hayWord)) : false
 }
 
 function matchesKeywordExact(haystack: string, keyword: string): boolean {
@@ -256,17 +302,13 @@ function matchesToken(haystack: string, token: string): boolean {
   const t = normalizeForMatch(token)
   if (!t) return false
   if (matchesKeywordExact(haystack, t)) return true
-  const stem = lightStem(t)
-  if (stem.length < 4) return false
+  const tokenForms = longEnough(stemCandidates(t))
+  if (tokenForms.length === 0) return false
   for (const word of haystackWords(haystack)) {
     if (isFalseFriend(t, word)) continue
     if (word === t) return true
-    const wStem = lightStem(word)
-    if (wStem === stem) return true
-    if (stem.length >= 4 && (word.startsWith(stem) || (stem.startsWith(wStem) && wStem.length >= 4))) {
-      if (isFalseFriend(t, word)) continue
-      return true
-    }
+    const wordForms = stemCandidates(word)
+    if (tokenForms.some((f) => wordForms.has(f))) return true
   }
   return false
 }
@@ -298,14 +340,90 @@ function contentTokens(term: string): string[] {
     .filter((p) => p && !MATCH_STOPWORDS.has(p))
 }
 
-/** Inflection-aware match; multi-word uses content-token AND after dropping stopwords. */
+/**
+ * A domestic newsroom does not repeat its own country: an AI term like "izbori u Srbiji"
+ * has to match the headline "prvo su tražili izbore".
+ */
+const IMPLIED_LOCATION_STEMS = ['srbij', 'serbia', 'serbian', 'balkan', 'beograd', 'belgrad']
+
+/** …but only when the story is not about somewhere else instead. */
+const OTHER_COUNTRIES = [
+  'Hrvatska',
+  'Croatia',
+  'Bosna',
+  'Bosnia',
+  'Hercegovina',
+  'Crna Gora',
+  'Montenegro',
+  'Makedonija',
+  'Macedonia',
+  'Slovenija',
+  'Slovenia',
+  'Kosovo',
+  'Albanija',
+  'Albania',
+  'Bugarska',
+  'Bulgaria',
+  'Rumunija',
+  'Romania',
+  'Mađarska',
+  'Madjarska',
+  'Hungary',
+  'Grčka',
+  'Greece',
+  'Turska',
+  'Turkey',
+  'Rusija',
+  'Russia',
+  'Ukrajina',
+  'Ukraine',
+  'Nemačka',
+  'Germany',
+  'Francuska',
+  'France',
+  'Italija',
+  'Italy',
+  'Austrija',
+  'Austria',
+  'Poljska',
+  'Poland',
+]
+
+function isImpliedLocation(token: string): boolean {
+  const t = normalizeForMatch(token)
+  return IMPLIED_LOCATION_STEMS.some((stem) => t.startsWith(stem))
+}
+
+/** True if the text names a country the search term did not ask for. */
+function mentionsOtherCountry(haystack: string, allowedTokens: string[]): boolean {
+  const allowed = new Set(allowedTokens.map(normalizeForMatch))
+  return OTHER_COUNTRIES.some((country) => {
+    const toks = contentTokens(country)
+    if (toks.length === 0 || toks.some((t) => allowed.has(t))) return false
+    return (
+      matchesKeywordExact(haystack, country) || toks.every((t) => matchesToken(haystack, t))
+    )
+  })
+}
+
+/**
+ * Inflection-aware match. Multi-word terms need every content token, except that a
+ * local-location token may be implied when the story names no other country.
+ */
 export function matchesKeyword(haystack: string, keyword: string): boolean {
   const k = normalizeForMatch(keyword)
   if (!k) return false
   if (matchesKeywordExact(haystack, k)) return true
-  let toks = contentTokens(k).filter((t) => !/^\d+$/.test(t))
+  const toks = contentTokens(k).filter((t) => !/^\d+$/.test(t))
   if (toks.length === 0) return false
-  return toks.every((t) => matchesToken(haystack, t))
+  const missing = toks.filter((t) => !matchesToken(haystack, t))
+  if (missing.length === 0) return true
+  if (!missing.every(isImpliedLocation)) return false
+  // Implying the country is only safe when something distinctive did match: `vlada` alone
+  // would otherwise pull in the given name Vlado, `premijer` alone any prime minister.
+  const present = toks.filter((t) => !missing.includes(t))
+  if (!present.some((t) => !GENERIC_TERMS.has(t))) return false
+  return !mentionsOtherCountry(haystack, toks)
 }
 
 export function articleMatchesKeywords(
@@ -320,7 +438,11 @@ export function articleMatchesKeywords(
   )
 }
 
-const BROAD_SINGLE_TERMS = new Set([
+/**
+ * Generic on their own: they describe a whole beat, not a story. Kept as search terms
+ * but weighted down, so they can narrow a match without carrying one.
+ */
+const GENERIC_TERMS = new Set([
   'kina',
   'kineski',
   'kineska',
@@ -372,6 +494,44 @@ const BROAD_SINGLE_TERMS = new Set([
   'precipitation',
 ])
 
+const WEIGHT_PHRASE = 1.0
+const WEIGHT_DISTINCTIVE = 0.8
+const WEIGHT_SHORT = 0.5
+const WEIGHT_GENERIC = 0.3
+
+/** A term at or above this weight is specific enough to justify a hit on its own. */
+const SELF_SUFFICIENT_WEIGHT = WEIGHT_SHORT
+/** Share of total facet weight an article must cover. */
+const MIN_COVERAGE = 0.6
+
+/** How much evidence one search term carries. Phrases beat bare generic words. */
+export function termWeight(term: string): number {
+  const toks = contentTokens(term).filter((t) => !/^\d+$/.test(t))
+  if (toks.length === 0) return 0
+  if (toks.length >= 2) return WEIGHT_PHRASE
+  const tok = toks[0]!
+  if (GENERIC_TERMS.has(tok)) return WEIGHT_GENERIC
+  if (tok.length >= 5) return WEIGHT_DISTINCTIVE
+  return WEIGHT_SHORT
+}
+
+/** A facet is as specific as its most specific language variant. */
+function facetWeight(group: string[]): number {
+  return group.reduce((max, alt) => Math.max(max, termWeight(alt)), 0)
+}
+
+/**
+ * How many facets an article may leave implicit. AI over-decomposes long intents and
+ * newsrooms imply context instead of spelling it out, so full AND across every facet
+ * rejects obviously on-topic stories. Two facets stay mandatory because there is
+ * nothing left to corroborate a single hit.
+ */
+function allowedFacetMisses(count: number): number {
+  if (count <= 2) return 0
+  if (count <= 4) return 1
+  return 2
+}
+
 /** Prefer AI phrases; also keep distinctive content cores for inflection matching. */
 export function keywordMatchTerms(keyword: {
   phrase: string
@@ -385,7 +545,6 @@ export function keywordMatchTerms(keyword: {
   const add = (term: string) => {
     const key = normalizeForMatch(term)
     if (!key || seen.has(key) || MATCH_STOPWORDS.has(key) || /^\d+$/.test(key)) return
-    if (!term.includes(' ') && BROAD_SINGLE_TERMS.has(key)) return
     seen.add(key)
     out.push(term)
   }
@@ -393,7 +552,7 @@ export function keywordMatchTerms(keyword: {
   for (const term of base) {
     add(term)
     const cores = contentTokens(term).filter((t) => !/^\d+$/.test(t))
-    if (cores.length === 1 && cores[0]!.length >= 5 && !BROAD_SINGLE_TERMS.has(cores[0]!)) {
+    if (cores.length === 1 && cores[0]!.length >= 5 && !GENERIC_TERMS.has(cores[0]!)) {
       add(cores[0]!)
     }
   }
@@ -404,6 +563,11 @@ export function keywordMatchTerms(keyword: {
   return out
 }
 
+/**
+ * Generic single words are kept: dropping them used to delete whole facets such as
+ * ["Srbija", "Serbia"], which both widened the match and pushed the facet count below
+ * the two needed to keep strict mode alive.
+ */
 function cleanMatchGroups(raw: unknown): string[][] {
   if (!Array.isArray(raw)) return []
   const groups: string[][] = []
@@ -416,13 +580,26 @@ function cleanMatchGroups(raw: unknown): string[][] {
       if (!s) continue
       const key = normalizeForMatch(s)
       if (!key || seen.has(key) || MATCH_STOPWORDS.has(key) || /^\d+$/.test(key)) continue
-      if (!s.includes(' ') && BROAD_SINGLE_TERMS.has(key)) continue
       seen.add(key)
       cleaned.push(s)
     }
     if (cleaned.length) groups.push(cleaned)
   }
   return groups
+}
+
+function cleanExcludeTerms(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    const s = String(item || '').trim()
+    const key = normalizeForMatch(s)
+    if (!key || seen.has(key) || MATCH_STOPWORDS.has(key) || /^\d+$/.test(key)) continue
+    seen.add(key)
+    out.push(s)
+  }
+  return out
 }
 
 export function suggestMatchMode(phrase: string): 'loose' | 'strict' {
@@ -432,16 +609,57 @@ export function suggestMatchMode(phrase: string): 'loose' | 'strict' {
   return 'loose'
 }
 
-/** Multi-facet / strict keywords use stage-2 relevance when available. */
-export function keywordNeedsRelevance(
-  keyword: {
-    match_groups?: string[][] | null
-    match_mode?: string | null
-  },
-): boolean {
+/** Multi-facet keywords, and keywords with sense guards, use stage-2 relevance. */
+export function keywordNeedsRelevance(keyword: {
+  match_groups?: string[][] | null
+  match_mode?: string | null
+  exclude_terms?: string[] | null
+}): boolean {
   const groups = cleanMatchGroups(keyword.match_groups)
   if (groups.length >= 2) return true
-  return keyword.match_mode === 'strict' && groups.length >= 2
+  if (keyword.match_mode === 'strict' && groups.length > 0) return true
+  return cleanExcludeTerms(keyword.exclude_terms).length > 0
+}
+
+type MatchArticle = {
+  id?: string
+  title: string
+  summary: string
+  raw_text_normalized?: string
+}
+
+/**
+ * Weighted facet coverage: OR within a facet (language variants), weighted partial AND
+ * across facets. The most specific facet is the intent's anchor and stays mandatory.
+ */
+function articleCoversFacets(article: MatchArticle, groups: string[][]): boolean {
+  const facets = groups.filter((g) => g.length > 0)
+  if (facets.length === 0) return false
+  const weights = facets.map(facetWeight)
+  const hits = facets.map((group) => articleMatchesKeywords(article, group))
+
+  const total = weights.reduce((sum, w) => sum + w, 0)
+  if (total <= 0) return false
+  const covered = weights.reduce((sum, w, i) => (hits[i] ? sum + w : sum), 0)
+  if (covered / total < MIN_COVERAGE) return false
+
+  const need = Math.max(1, facets.length - allowedFacetMisses(facets.length))
+  if (hits.filter(Boolean).length < need) return false
+
+  const anchor = weights.indexOf(Math.max(...weights))
+  return hits[anchor] === true
+}
+
+/**
+ * OR across terms, but a bare generic word cannot carry the match by itself. A long
+ * intent that expanded into `["izbori u Srbiji", "Srbija"]` used to match every story
+ * mentioning Serbia. Generic terms are only consulted when the keyword has nothing more
+ * specific — i.e. the user really did subscribe to a whole beat.
+ */
+function articleMatchesScoredTerms(article: MatchArticle, terms: string[]): boolean {
+  if (terms.length === 0) return false
+  const specific = terms.filter((t) => termWeight(t) >= SELF_SUFFICIENT_WEIGHT)
+  return articleMatchesKeywords(article, specific.length > 0 ? specific : terms)
 }
 
 /**
@@ -449,21 +667,20 @@ export function keywordNeedsRelevance(
  * when the map is provided; otherwise use rule recall for loose topics.
  */
 export function articleMatchesKeyword(
-  article: {
-    id?: string
-    title: string
-    summary: string
-    raw_text_normalized?: string
-  },
+  article: MatchArticle,
   keyword: {
     id?: string
     phrase: string
     search_terms?: string[] | null
     match_groups?: string[][] | null
     match_mode?: string | null
+    exclude_terms?: string[] | null
   },
   relevance?: Map<string, boolean>,
 ): boolean {
+  const excludes = cleanExcludeTerms(keyword.exclude_terms)
+  if (excludes.length > 0 && articleMatchesKeywords(article, excludes)) return false
+
   const needsRerank = keywordNeedsRelevance(keyword)
 
   if (needsRerank && relevance && keyword.id && article.id) {
@@ -479,11 +696,8 @@ export function articleMatchesKeyword(
       : suggestMatchMode(keyword.phrase)
   const groups = cleanMatchGroups(keyword.match_groups)
 
-  // Without relevance table loaded: soft half-group recall (align crawler stage-1)
-  if ((mode === 'strict' || groups.length >= 2) && groups.length >= 2) {
-    const hits = groups.filter((group) => articleMatchesKeywords(article, group)).length
-    const need = Math.max(1, Math.ceil(groups.length / 2))
-    return hits >= need
+  if (groups.length > 0 && (mode === 'strict' || groups.length >= 2)) {
+    return articleCoversFacets(article, groups)
   }
-  return articleMatchesKeywords(article, keywordMatchTerms(keyword))
+  return articleMatchesScoredTerms(article, keywordMatchTerms(keyword))
 }
