@@ -92,20 +92,22 @@ def entry_to_article(source_name: str, entry: dict[str, Any]) -> dict[str, Any] 
 
 def load_user_keywords(sb: Client) -> dict[str, list[dict[str, Any]]]:
     """Map user_id -> that user's keyword rows (for per-keyword strict/loose match)."""
-    try:
-        result = (
-            sb.table("keywords")
-            .select("id, user_id, phrase, search_terms, match_groups, match_mode")
-            .limit(2000)
-            .execute()
-        )
-    except Exception:  # noqa: BLE001
-        result = (
-            sb.table("keywords")
-            .select("id, user_id, phrase, search_terms")
-            .limit(2000)
-            .execute()
-        )
+    # Widest select first; fall back when a migration has not been applied yet.
+    selects = (
+        "id, user_id, phrase, search_terms, match_groups, match_mode, exclude_terms",
+        "id, user_id, phrase, search_terms, match_groups, match_mode",
+        "id, user_id, phrase, search_terms",
+    )
+    result = None
+    for columns in selects:
+        try:
+            result = sb.table("keywords").select(columns).limit(2000).execute()
+            break
+        except Exception:  # noqa: BLE001
+            continue
+    if result is None:
+        return {}
+
     by_user: dict[str, list[dict[str, Any]]] = {}
     for row in result.data or []:
         uid = row.get("user_id")
@@ -279,6 +281,7 @@ def crawl() -> None:
                     "keyword_phrase": row.get("phrase") or "",
                     "match_mode": row.get("match_mode") or "",
                     "match_groups": row.get("match_groups"),
+                    "exclude_terms": row.get("exclude_terms"),
                     "article_id": aid,
                     "title": article.get("title") or "",
                     "summary": article.get("summary") or "",
