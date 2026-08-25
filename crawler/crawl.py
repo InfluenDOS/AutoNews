@@ -1,4 +1,4 @@
-"""Fetch Serbian media RSS feeds; store articles and per-user keyword hits."""
+"""Fetch Serbian media RSS feeds; store articles and cumulative per-user keyword hits."""
 
 from __future__ import annotations
 
@@ -166,46 +166,58 @@ def resolve_article_ids(sb: Client, urls: list[str]) -> dict[str, str]:
     return out
 
 
-def replace_hits(sb: Client, hits: list[dict[str, str]]) -> tuple[int, int]:
-    """Full rebuild of article_hits for correctness after each crawl."""
-    existing = sb.table("article_hits").select("user_id, article_id").limit(20000).execute().data or []
-    deleted = 0
-    if existing:
-        # delete in chunks by article_id groups
-        ids = list({f"{r['user_id']}|{r['article_id']}" for r in existing})
-        # simpler: delete all via service role — use neq trick on created_at
-        sb.table("article_hits").delete().gte("created_at", "1970-01-01").execute()
-        deleted = len(ids)
-
+def merge_hits(sb: Client, hits: list[dict[str, str]]) -> int:
+    """Append new matches; never remove existing hits (user feed is cumulative)."""
+    if not hits:
+        return 0
     inserted = 0
     chunk_size = 200
     for i in range(0, len(hits), chunk_size):
         chunk = hits[i : i + chunk_size]
         sb.table("article_hits").upsert(chunk, on_conflict="user_id,article_id").execute()
         inserted += len(chunk)
-    return inserted, deleted
+    return inserted
 
 
-def cleanup_orphan_articles(sb: Client, keep_ids: set[str] | None = None) -> int:
-    """Remove articles that no user currently matches (stars cascade with article)."""
-    articles = sb.table("articles").select("id, source").limit(5000).execute().data or []
-    if not articles:
+def cleanup_unmatched_batch(
+    sb: Client,
+    batch_ids: set[str],
+    *,
+    keep_ids: set[str] | None = None,
+) -> int:
+    """Remove only this-run candidates that never became a hit (and are not starred/preview).
+
+    Historical matches stay forever: we do not scan/delete the whole articles table.
+    """
+    if not batch_ids:
         return 0
-    hit_rows = sb.table("article_hits").select("article_id").limit(20000).execute().data or []
-    keep = {r["article_id"] for r in hit_rows}
-    # keep starred articles even without hits
-    star_rows = sb.table("stars").select("article_id").limit(20000).execute().data or []
-    keep |= {r["article_id"] for r in star_rows}
-    if keep_ids:
-        keep |= keep_ids
-    # keep guest-preview culture / movie feeds
-    keep |= {
-        r["id"]
-        for r in articles
-        if (r.get("source") or "") in PREVIEW_SOURCE_NAMES
-    }
 
-    to_delete = [r["id"] for r in articles if r["id"] not in keep]
+    keep: set[str] = set(keep_ids or ())
+    ids = list(batch_ids)
+    chunk_size = 100
+    for i in range(0, len(ids), chunk_size):
+        chunk = ids[i : i + chunk_size]
+        hit_rows = (
+            sb.table("article_hits").select("article_id").in_("article_id", chunk).execute().data
+            or []
+        )
+        keep |= {r["article_id"] for r in hit_rows}
+        star_rows = (
+            sb.table("stars").select("article_id").in_("article_id", chunk).execute().data or []
+        )
+        keep |= {r["article_id"] for r in star_rows}
+
+    # Preview-source rows in this batch stay for guest “随便看看”.
+    for i in range(0, len(ids), chunk_size):
+        chunk = ids[i : i + chunk_size]
+        rows = sb.table("articles").select("id, source").in_("id", chunk).execute().data or []
+        keep |= {
+            r["id"]
+            for r in rows
+            if (r.get("source") or "") in PREVIEW_SOURCE_NAMES
+        }
+
+    to_delete = [aid for aid in batch_ids if aid not in keep]
     for i in range(0, len(to_delete), 100):
         chunk = to_delete[i : i + 100]
         sb.table("articles").delete().in_("id", chunk).execute()
@@ -333,9 +345,12 @@ def crawl() -> None:
             )
 
     hits = filter_matches_with_relevance(sb, matches=stage1_matches)
-    inserted, deleted_hits = replace_hits(sb, hits)
+    inserted = merge_hits(sb, hits)
+    # Only prune this-run keyword candidates that never became hits.
+    # Matched articles (hits) are permanent user feed content — never wiped on crawl.
+    candidate_ids = {id_by_url[u] for u in (a["url"] for a in candidates) if u in id_by_url}
     preview_ids = {id_by_url[u] for u in (a["url"] for a in preview_only) if u in id_by_url}
-    removed = cleanup_orphan_articles(sb, preview_ids)
+    removed = cleanup_unmatched_batch(sb, candidate_ids, keep_ids=preview_ids)
 
     # Sample matched article titles for the UI accordion
     sample_items: list[dict[str, str]] = []
@@ -391,7 +406,7 @@ def crawl() -> None:
         )
     print(
         f"Scanned {scanned} · matched articles {len(candidates)} · preview kept {len(preview_only)} · "
-        f"upserted {count} · hits {inserted} (replaced {deleted_hits}) · removed orphans {removed}"
+        f"upserted {count} · hits merged {inserted} · pruned unmatched {removed}"
     )
 
 
