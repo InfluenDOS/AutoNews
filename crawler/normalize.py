@@ -362,7 +362,15 @@ def content_tokens(term: str) -> list[str]:
 
 # A domestic newsroom does not repeat its own country: an AI term like "izbori u Srbiji"
 # has to match the headline "prvo su tražili izbore".
-_IMPLIED_LOCATION_STEMS = ("srbij", "serbia", "serbian", "balkan", "beograd", "belgrad")
+_IMPLIED_LOCATION_STEMS = (
+    "srbij",
+    "srpsk",
+    "serbia",
+    "serbian",
+    "balkan",
+    "beograd",
+    "belgrad",
+)
 
 # …but only when the story is not about somewhere else instead.
 _OTHER_COUNTRIES = (
@@ -662,24 +670,46 @@ def phrase_hits(hay: str, normalized: str, phrase: str) -> bool:
     return matches_keyword(normalized, phrase) or matches_keyword(hay, phrase)
 
 
-def recall_score(article: dict[str, Any], row: dict[str, Any]) -> int:
-    """How much of the keyword's intent is visible anywhere in the article.
+def _is_location_group(group: list[str]) -> bool:
+    """True when every token in the facet is a local place name (Srbija, Beograd, …)."""
+    toks: list[str] = []
+    for alt in group:
+        toks.extend(t for t in content_tokens(alt) if not t.isdigit())
+    return bool(toks) and all(_is_implied_location(t) for t in toks)
 
-    Counts facets — aspects of the intent — rather than surface variants, so a keyword
-    with many synonyms per facet does not outrank one with few. Deliberately generous:
-    a single facet is enough to shortlist. This only decides whether an article is worth
-    an LLM call, never whether it is relevant, so recall matters here and precision does
-    not; ranking by the count spends a limited scoring budget on the best candidates first.
+
+def recall_score(article: dict[str, Any], row: dict[str, Any]) -> int:
+    """How much of the keyword's *topic* is visible anywhere in the article.
+
+    Location facets (`Srbija`, `Beograd`) are almost always true of Balkan domestic news,
+    so they rank a candidate but cannot shortlist it when the keyword also has a topic
+    facet. Otherwise a "Serbian PM" subscription would send every flood and sports story
+    to the model. A keyword that *is* just a place (the user subscribed to Serbia) still
+    shortlists on the place.
+
+    Ranking: topic hits are worth ten location hits, so a limited scoring budget is spent
+    on the strongest candidates first. This never decides relevance — only whether the
+    article is worth an LLM call.
     """
     hay, normalized = haystack_for_article(article)
-    groups = clean_match_groups(row.get("match_groups"))
-    hits = sum(
-        1 for g in groups if any(phrase_hits(hay, normalized, alt) for alt in g)
-    )
-    if hits:
-        return hits
+    groups = [g for g in clean_match_groups(row.get("match_groups")) if g]
+    if groups:
+        hits = [any(phrase_hits(hay, normalized, alt) for alt in g) for g in groups]
+        topic = [i for i, g in enumerate(groups) if not _is_location_group(g)]
+        if topic:
+            topic_hits = sum(1 for i in topic if hits[i])
+            if not topic_hits:
+                return 0
+            place_hits = sum(1 for i, h in enumerate(hits) if h and i not in topic)
+            return topic_hits * 10 + place_hits
+        return sum(1 for h in hits if h)
+
     terms = expand_match_terms(row.get("phrase") or "", row.get("search_terms") or [])
-    return sum(1 for term in terms if phrase_hits(hay, normalized, term))
+    if not terms:
+        return 0
+    specific = [t for t in terms if term_weight(t) >= SELF_SUFFICIENT_WEIGHT]
+    pool = specific or terms
+    return sum(1 for term in pool if phrase_hits(hay, normalized, term))
 
 
 def score_facets(

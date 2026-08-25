@@ -344,7 +344,15 @@ function contentTokens(term: string): string[] {
  * A domestic newsroom does not repeat its own country: an AI term like "izbori u Srbiji"
  * has to match the headline "prvo su tražili izbore".
  */
-const IMPLIED_LOCATION_STEMS = ['srbij', 'serbia', 'serbian', 'balkan', 'beograd', 'belgrad']
+const IMPLIED_LOCATION_STEMS = [
+  'srbij',
+  'srpsk',
+  'serbia',
+  'serbian',
+  'balkan',
+  'beograd',
+  'belgrad',
+]
 
 /** …but only when the story is not about somewhere else instead. */
 const OTHER_COUNTRIES = [

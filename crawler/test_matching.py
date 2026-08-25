@@ -11,6 +11,7 @@ from normalize import (
     recall_score,
     term_weight,
 )
+from relevance import rule_confident
 
 failures: list[str] = []
 
@@ -196,27 +197,67 @@ check(
 )
 
 
-# --- Recall shortlist: generous on purpose, and body-aware ---------------------
+# --- Recall shortlist: topic facets required, location ranks, body-aware ------
 
 CHINA_SERBIA = {
     "phrase": "中国在塞尔维亚的投资",
     "match_groups": [["kineski", "kineska", "Kina"], ["Srbija", "Srbiji"]],
     "match_mode": "strict",
 }
+PM = {
+    "phrase": "塞尔维亚总理的动向",
+    "match_mode": "strict",
+    "match_groups": [
+        ["premijer", "premijerka", "predsednik vlade"],
+        ["Srbija", "Srbije", "Srbiji"],
+    ],
+    "exclude_terms": ["premijera"],
+}
+JUST_SERBIA = {
+    "phrase": "塞尔维亚",
+    "match_groups": [["Srbija", "Srbiji", "Serbia"]],
+    "match_mode": "loose",
+}
 
+# Topic hit = 10, location hit = 1. Both present → 11.
 check(
-    "recall counts every term that appears",
+    "recall counts topic and location facets with topic weighted",
     recall_score(art("Kineske investicije u Srbiji dostigle rekord"), CHINA_SERBIA),
-    2,
+    11,
 )
 check(
-    "recall shortlists on a single term the strict rule would reject",
+    "recall shortlists on a topic facet the strict rule would reject",
     recall_score(art("Kineske investicije u Mađarskoj"), CHINA_SERBIA) > 0,
     True,
 )
 check(
     "recall stays out when nothing appears",
     recall_score(art("Poplave u Novom Sadu"), CHINA_SERBIA),
+    0,
+)
+check(
+    "a domestic flood is not a PM story just because it names Serbia",
+    recall_score(art("Poplave u Srbiji, Novi Sad pod vodom"), PM),
+    0,
+)
+check(
+    "a domestic flood is not a China story just because it names Serbia",
+    recall_score(art("Poplave u Srbiji, Novi Sad pod vodom"), CHINA_SERBIA),
+    0,
+)
+check(
+    "the topic facet is enough to shortlist even without the country",
+    recall_score(art("Premijer održao konferenciju za medije"), PM) > 0,
+    True,
+)
+check(
+    "a place-only keyword still shortlists domestic news",
+    recall_score(art("Poplave u Srbiji, Novi Sad pod vodom"), JUST_SERBIA) > 0,
+    True,
+)
+check(
+    "film premiere does not shortlist a PM keyword",
+    recall_score(art("Premijera filma u Beogradu"), PM),
     0,
 )
 
@@ -236,11 +277,41 @@ check(
 check(
     "body brings both facets into recall",
     recall_score(BODY_ONLY, CHINA_SERBIA),
-    2,
+    11,
 )
 check(
     "body lets the strict rule match too",
     article_matches_keyword_row(BODY_ONLY, CHINA_SERBIA),
+    True,
+)
+
+# Rules treating a longer text as more evidence accept film-premiere collisions.
+# The fallback therefore judges title + summary only.
+BODY_FALSE_FRIEND = {
+    "keyword_phrase": PM["phrase"],
+    "match_mode": "strict",
+    "match_groups": PM["match_groups"],
+    "exclude_terms": PM["exclude_terms"],
+    "title": "Kijanu Rivs iznenadio izborom omiljenog filma",
+    "summary": "Karijera Kijanua Rivsa obuhvata širok spektar filmova.",
+    "body": "Premijer Srbije prisustvovao je premijeri filma u Beogradu.",
+}
+check(
+    "rule fallback ignores a body-only PM mention",
+    rule_confident(BODY_FALSE_FRIEND),
+    False,
+)
+check(
+    "shortlist still sees the body so the model can decide",
+    recall_score(
+        {
+            "title": BODY_FALSE_FRIEND["title"],
+            "summary": BODY_FALSE_FRIEND["summary"],
+            "body": BODY_FALSE_FRIEND["body"],
+        },
+        PM,
+    )
+    > 0,
     True,
 )
 

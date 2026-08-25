@@ -48,20 +48,24 @@ RELEVANCE_SYSTEM = """你是新闻订阅的相关性审核员。用户用一句�
 
 
 def stage1_match(article: dict[str, Any], row: dict[str, Any]) -> bool:
-    """Shortlist only: does any term of this keyword appear in the article at all?"""
+    """Shortlist only: does the article show the keyword's topic, not just a place name?"""
     return recall_score(article, row) > 0
 
 
 def rule_confident(match: dict[str, Any]) -> bool:
-    """Would the old strict rule matcher have accepted this on its own?
+    """Would the strict rule matcher have accepted this on its own?
 
     Used only as the fallback when the model is unavailable or the scoring budget is
     spent, so a confident hit still reaches the feed instead of being silently dropped.
+
+    Deliberately judged on title and summary alone. Rules read a longer text as more
+    chances to hit a wrong sense, not as more evidence — over a full body a Serbian-PM
+    keyword starts accepting stories about a film premiere. Only the model gains from
+    the body, so the rule fallback stays on the short, dense text.
     """
     article = {
         "title": match.get("title") or "",
         "summary": match.get("summary") or "",
-        "body": match.get("body") or "",
     }
     row = {
         "phrase": match.get("keyword_phrase") or "",

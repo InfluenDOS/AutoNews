@@ -124,7 +124,7 @@ def load_user_keywords(sb: Client) -> dict[str, list[dict[str, Any]]]:
 def matching_keyword_rows(
     article: dict[str, Any], user_keywords: dict[str, list[dict[str, Any]]]
 ) -> list[tuple[str, dict[str, Any], int]]:
-    """Shortlist: (user_id, keyword_row, recall_score) for keywords with any term present."""
+    """Shortlist: (user_id, keyword_row, recall_score) for keywords whose topic is visible."""
     out: list[tuple[str, dict[str, Any], int]] = []
     for uid, rows in user_keywords.items():
         for row in rows:
@@ -226,6 +226,7 @@ def crawl() -> None:
     )
 
     candidates: list[dict[str, Any]] = []
+    pool: list[dict[str, Any]] = []
     preview_articles: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
     scanned = 0
@@ -256,31 +257,42 @@ def crawl() -> None:
 
             if not user_keywords:
                 continue
-            # Pass 1 on title + summary: cheap, and decides whose body is worth downloading.
-            if not matching_keyword_rows(article, user_keywords):
-                continue
-            candidates.append(article)
+            pool.append(article)
 
     if not user_keywords:
         print("No keywords (or AI terms) yet — keeping guest preview pool only.")
 
-    candidates = candidates[:500]
-
-    # Download the bodies, then redo recall over the full text. An RSS summary is a few
-    # hundred characters; terms regularly appear only further down the article.
-    body_targets = [a["url"] for a in candidates][:BODY_FETCH_MAX]
-    bodies = fetch_bodies(body_targets)
-    for article in candidates:
-        body = bodies.get(article["url"], "")
-        if body:
-            article["body"] = body
-    print(f"Bodies fetched {len(bodies)}/{len(body_targets)}")
-
-    for article in candidates:
-        hits = matching_keyword_rows(article, user_keywords)
-        if hits:
-            url_kw_hits[article["url"]] = hits
-    candidates = [a for a in candidates if a["url"] in url_kw_hits]
+    # Pass 1 on title + summary: distinctive/topic hits go first. Remaining slots
+    # download recent unmatched articles so a term that only appears in the body
+    # (typical of "cooperation signed" headlines) still gets a chance.
+    priority: list[tuple[int, dict[str, Any]]] = []
+    if user_keywords:
+        for article in pool:
+            hits = matching_keyword_rows(article, user_keywords)
+            score = max((s for _, _, s in hits), default=0)
+            if score > 0:
+                priority.append((score, article))
+        priority.sort(key=lambda item: -item[0])
+        priority_articles = [a for _, a in priority]
+        priority_urls = {a["url"] for a in priority_articles}
+        remainder = [a for a in pool if a["url"] not in priority_urls]
+        remainder.sort(key=lambda a: a.get("published_at") or "", reverse=True)
+        fetch_list = (priority_articles + remainder)[:BODY_FETCH_MAX]
+        bodies = fetch_bodies([a["url"] for a in fetch_list])
+        for article in fetch_list:
+            body = bodies.get(article["url"], "")
+            if body:
+                article["body"] = body
+        print(
+            f"Bodies fetched {len(bodies)}/{len(fetch_list)} "
+            f"(priority {len(priority_articles)}, remainder fill "
+            f"{max(0, len(fetch_list) - len(priority_articles))})"
+        )
+        for article in fetch_list:
+            hits = matching_keyword_rows(article, user_keywords)
+            if hits:
+                url_kw_hits[article["url"]] = hits
+                candidates.append(article)
 
     # Public movie/culture pool for guests (dedupe against keyword matches).
     preview_by_url = {a["url"]: a for a in preview_articles}
