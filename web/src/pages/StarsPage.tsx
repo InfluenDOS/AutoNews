@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArticleCard } from '../components/ArticleCard'
 import { useAuth } from '../context/AuthContext'
-import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { ARTICLE_LIST_COLUMNS, isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Article } from '../types'
 
 type StarredRow = {
@@ -25,7 +25,7 @@ export function StarsPage() {
     setError(null)
     const { data, error: err } = await supabase
       .from('stars')
-      .select('article_id, articles(*)')
+      .select(`article_id, articles(${ARTICLE_LIST_COLUMNS})`)
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 

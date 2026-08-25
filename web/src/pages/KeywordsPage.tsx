@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArticleCard } from '../components/ArticleCard'
 import { useAuth } from '../context/AuthContext'
-import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { ARTICLE_LIST_COLUMNS, isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Article } from '../types'
 import { KeywordFeedPage } from './KeywordFeedPage'
 
@@ -109,7 +109,7 @@ function GuestKeywordsPreview() {
 
       const movieQuery = await supabase
         .from('articles')
-        .select('*')
+        .select(ARTICLE_LIST_COLUMNS)
         .or(movieOr)
         .order('published_at', { ascending: false })
         .limit(FETCH_POOL)
@@ -118,7 +118,7 @@ function GuestKeywordsPreview() {
       if (movieQuery.error || pool.length < PREVIEW_COUNT) {
         const recent = await supabase
           .from('articles')
-          .select('*')
+          .select(ARTICLE_LIST_COLUMNS)
           .order('published_at', { ascending: false })
           .limit(FETCH_POOL)
         if (recent.error && pool.length === 0) {

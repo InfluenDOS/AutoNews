@@ -609,18 +609,6 @@ export function suggestMatchMode(phrase: string): 'loose' | 'strict' {
   return 'loose'
 }
 
-/** Multi-facet keywords, and keywords with sense guards, use stage-2 relevance. */
-export function keywordNeedsRelevance(keyword: {
-  match_groups?: string[][] | null
-  match_mode?: string | null
-  exclude_terms?: string[] | null
-}): boolean {
-  const groups = cleanMatchGroups(keyword.match_groups)
-  if (groups.length >= 2) return true
-  if (keyword.match_mode === 'strict' && groups.length > 0) return true
-  return cleanExcludeTerms(keyword.exclude_terms).length > 0
-}
-
 type MatchArticle = {
   id?: string
   title: string
@@ -663,8 +651,13 @@ function articleMatchesScoredTerms(article: MatchArticle, terms: string[]): bool
 }
 
 /**
- * Match one keyword. Multi-facet keywords require a cached stage-2 `relevant=true`
- * when the map is provided; otherwise use rule recall for loose topics.
+ * Match one keyword.
+ *
+ * A stored verdict always wins: the crawler produced it by having the model read the
+ * full article body against the user's intent, and the client only ever holds the title
+ * and RSS summary, so re-deriving the answer here can only be worse. Rules run when no
+ * verdict exists — a keyword edited since the last crawl, or a crawl that ran out of
+ * scoring budget and fell back to rules itself.
  */
 export function articleMatchesKeyword(
   article: MatchArticle,
@@ -678,17 +671,13 @@ export function articleMatchesKeyword(
   },
   relevance?: Map<string, boolean>,
 ): boolean {
+  if (relevance && keyword.id && article.id) {
+    const verdict = relevance.get(`${keyword.id}:${article.id}`)
+    if (verdict !== undefined) return verdict
+  }
+
   const excludes = cleanExcludeTerms(keyword.exclude_terms)
   if (excludes.length > 0 && articleMatchesKeywords(article, excludes)) return false
-
-  const needsRerank = keywordNeedsRelevance(keyword)
-
-  if (needsRerank && relevance && keyword.id && article.id) {
-    const key = `${keyword.id}:${article.id}`
-    if (relevance.has(key)) return relevance.get(key) === true
-    // No score yet for this pair — do not attribute another keyword's hit here
-    return false
-  }
 
   const mode =
     keyword.match_mode === 'strict' || keyword.match_mode === 'loose'

@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useJobs } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
 import { articleMatchesKeyword } from '../lib/normalize'
-import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { ARTICLE_LIST_COLUMNS, isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Article, Keyword } from '../types'
 
 const REFRESH_MS = 60_000
@@ -104,7 +104,7 @@ export function KeywordFeedPage({ all = false }: Props) {
       supabase.from('stars').select('article_id').eq('user_id', user.id),
       supabase
         .from('article_hits')
-        .select('article_id, created_at, articles(*)')
+        .select(`article_id, created_at, articles(${ARTICLE_LIST_COLUMNS})`)
         .eq('user_id', user.id),
     ])
 
