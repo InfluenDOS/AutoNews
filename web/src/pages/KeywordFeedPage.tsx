@@ -105,7 +105,9 @@ export function KeywordFeedPage({ all = false }: Props) {
       supabase
         .from('article_hits')
         .select(`article_id, created_at, articles(${ARTICLE_LIST_COLUMNS})`)
-        .eq('user_id', user.id),
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(5000),
     ])
 
     if (hitErr) {
@@ -134,24 +136,28 @@ export function KeywordFeedPage({ all = false }: Props) {
       const tb = b.published_at ? Date.parse(b.published_at) : 0
       return tb - ta
     })
-    const sliced = list.slice(0, 200)
 
     const kidList = keywords.map((k) => k.id).filter(Boolean)
-    const aidList = sliced.map((a) => a.id).filter(Boolean)
+    const aidList = list.map((a) => a.id).filter(Boolean)
     const relMap = new Map<string, boolean>()
     if (kidList.length && aidList.length) {
-      const { data: relRows } = await supabase
-        .from('article_keyword_relevance')
-        .select('keyword_id, article_id, relevant')
-        .in('keyword_id', kidList)
-        .in('article_id', aidList)
-      for (const r of relRows ?? []) {
-        const row = r as { keyword_id: string; article_id: string; relevant: boolean }
-        relMap.set(`${row.keyword_id}:${row.article_id}`, Boolean(row.relevant))
+      // Chunk to avoid PostgREST URL / payload limits on large feeds.
+      const chunkSize = 200
+      for (let i = 0; i < aidList.length; i += chunkSize) {
+        const aidChunk = aidList.slice(i, i + chunkSize)
+        const { data: relRows } = await supabase
+          .from('article_keyword_relevance')
+          .select('keyword_id, article_id, relevant')
+          .in('keyword_id', kidList)
+          .in('article_id', aidChunk)
+        for (const r of relRows ?? []) {
+          const row = r as { keyword_id: string; article_id: string; relevant: boolean }
+          relMap.set(`${row.keyword_id}:${row.article_id}`, Boolean(row.relevant))
+        }
       }
     }
 
-    setArticles(sliced)
+    setArticles(list)
     setHitMatchedAt(matchedAt)
     setRelevance(relMap)
     setStarredIds(new Set((stars ?? []).map((s: { article_id: string }) => s.article_id)))
