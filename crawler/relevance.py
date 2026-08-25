@@ -1,13 +1,9 @@
-"""Relevance: the model reads the article body and decides, keywords only shortlist.
+"""Relevance: bulk shortlist first, then the model decides.
 
-Keyword rules cannot settle whether a story is about the subscribed topic. They see a
-title and a truncated RSS summary, and the user's intent reaches them already compiled
-into a boolean term expression, which is lossy in both directions: a long phrase either
-fans out into single words that match everything, or into an AND that matches nothing.
-
-So keywords are demoted to what they are good at — cheaply shortlisting articles worth
-looking at — and the decision moves to the model, which reads the extracted body and
-gets the intent as the sentence the user actually wrote.
+Serbia-news pipeline: keywords only cast a wide net (any facet / any search term).
+The model reads the extracted body with the user's intent as a sentence and decides
+whether the story is actually about that topic. Rules never write hits on their own —
+they are only the fallback when the AI budget is spent or AI is unconfigured.
 """
 
 from __future__ import annotations
@@ -22,9 +18,9 @@ from normalize import article_matches_keyword_row, clean_exclude_terms, recall_s
 
 # Cost knobs (override via env). Bodies are long, so batches are smaller than they were
 # for title-only scoring; verdicts are cached per (keyword, article) so the steady-state
-# cost is only the newly published articles.
+# cost is only the newly published articles. Budget is sized for the broad shortlist.
 BATCH_SIZE = int(os.environ.get("RELEVANCE_BATCH_SIZE", "6"))
-MAX_SCORE_PER_RUN = int(os.environ.get("RELEVANCE_MAX_PER_RUN", "240"))
+MAX_SCORE_PER_RUN = int(os.environ.get("RELEVANCE_MAX_PER_RUN", "400"))
 BODY_CHARS_FOR_SCORING = int(os.environ.get("RELEVANCE_BODY_CHARS", "1200"))
 
 RELEVANCE_SYSTEM = """你是新闻订阅的相关性审核员。用户用一句中文写下他想追踪的主题，你要判断每篇稿件是不是真的在讲这个主题。

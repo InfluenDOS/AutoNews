@@ -197,7 +197,7 @@ check(
 )
 
 
-# --- Recall shortlist: topic facets required, location ranks, body-aware ------
+# --- Recall shortlist: broad OR (any facet / any term), topic ranks higher ------
 
 CHINA_SERBIA = {
     "phrase": "中国在塞尔维亚的投资",
@@ -236,14 +236,14 @@ check(
     0,
 )
 check(
-    "a domestic flood is not a PM story just because it names Serbia",
-    recall_score(art("Poplave u Srbiji, Novi Sad pod vodom"), PM),
-    0,
+    "place-only still shortlists for a multi-facet keyword (AI decides later)",
+    recall_score(art("Poplave u Srbiji, Novi Sad pod vodom"), PM) > 0,
+    True,
 )
 check(
-    "a domestic flood is not a China story just because it names Serbia",
-    recall_score(art("Poplave u Srbiji, Novi Sad pod vodom"), CHINA_SERBIA),
-    0,
+    "place-only still shortlists a China keyword (AI decides later)",
+    recall_score(art("Poplave u Srbiji, Novi Sad pod vodom"), CHINA_SERBIA) > 0,
+    True,
 )
 check(
     "the topic facet is enough to shortlist even without the country",
@@ -259,6 +259,11 @@ check(
     "film premiere does not shortlist a PM keyword",
     recall_score(art("Premijera filma u Beogradu"), PM),
     0,
+)
+check(
+    "loose search_terms: bare Srbija shortlists for AI (rules stay strict)",
+    recall_score(art("U Srbiji otvoren novi bazen"), LOOSE_WITH_GENERIC) > 0,
+    True,
 )
 
 # The body is where terms usually live: an RSS summary is one truncated sentence.
