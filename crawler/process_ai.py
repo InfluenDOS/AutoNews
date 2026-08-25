@@ -260,12 +260,15 @@ def _has_body_column(sb: Any) -> bool:
 
 
 def translate_one(article: dict[str, Any]) -> dict[str, str] | None:
+    # Rewrite from the extracted body when the crawl captured one: an RSS summary is a
+    # single truncated sentence, so summaries written from it read as padded restatements.
+    source_text = (article.get("body") or "").strip() or (article.get("summary") or "")
     user = (
         "请改写下面这条新闻为中文短讯 JSON（含 title_zh/lead_zh/summary_zh/body_zh）：\n"
         + json.dumps(
             {
                 "title": article.get("title") or "",
-                "summary": (article.get("summary") or "")[:1200],
+                "summary": source_text[:3000],
             },
             ensure_ascii=False,
         )
@@ -294,15 +297,25 @@ def translate_one(article: dict[str, Any]) -> dict[str, str] | None:
 def translate_articles(limit: int = 40, force: bool = False) -> int:
     sb = get_supabase()
     with_body = _has_body_column(sb)
-    select_cols = "id, title, summary, title_zh, body_zh" if with_body else "id, title, summary, title_zh"
-    result = (
-        sb.table("articles")
-        .select(select_cols)
-        .order("published_at", desc=True)
-        .limit(120)
-        .execute()
+    # Widest select first; fall back when a migration has not been applied yet.
+    selects = (
+        "id, title, summary, body, title_zh, body_zh" if with_body else "id, title, summary, body, title_zh",
+        "id, title, summary, title_zh, body_zh" if with_body else "id, title, summary, title_zh",
     )
-    rows = result.data or []
+    result = None
+    for columns in selects:
+        try:
+            result = (
+                sb.table("articles")
+                .select(columns)
+                .order("published_at", desc=True)
+                .limit(120)
+                .execute()
+            )
+            break
+        except Exception:  # noqa: BLE001
+            continue
+    rows = (result.data if result else []) or []
     if not force:
         if with_body:
             rows = [r for r in rows if not (r.get("body_zh") or "").strip()]

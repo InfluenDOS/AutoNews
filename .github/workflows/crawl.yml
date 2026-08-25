@@ -9,7 +9,8 @@ on:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Downloading article bodies adds a few minutes over RSS-only crawling.
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,8 +46,13 @@ jobs:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
           AI_MODEL: ${{ secrets.AI_MODEL }}
-          RELEVANCE_BATCH_SIZE: "12"
-          RELEVANCE_MAX_PER_RUN: "80"
+          # Relevance now reads article bodies: smaller batches, but it decides every
+          # shortlisted pair rather than only multi-facet keywords. Verdicts are cached
+          # per (keyword, article), so steady-state cost is just newly published articles.
+          RELEVANCE_BATCH_SIZE: "6"
+          RELEVANCE_MAX_PER_RUN: "240"
+          BODY_FETCH_MAX: "300"
+          BODY_FETCH_CONCURRENCY: "12"
         run: |
           export AI_BASE_URL="${AI_BASE_URL:-https://api.deepseek.com}"
           export AI_MODEL="${AI_MODEL:-deepseek-chat}"

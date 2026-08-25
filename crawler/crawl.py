@@ -12,13 +12,17 @@ import feedparser
 import httpx
 from supabase import Client, create_client
 
-from normalize import normalize_for_match
-from relevance import filter_matches_with_relevance, stage1_match
+from extract import fetch_bodies
+from normalize import normalize_for_match, recall_score
+from relevance import filter_matches_with_relevance
 from jobs import ensure_crawl_jobs, ensure_translate_jobs, mark_jobs
 from sources import FEED_SOURCES
 
 
 USER_AGENT = "AutoNewsBot/1.0 (+https://github.com/AutoNews; RSS aggregator)"
+
+# How many shortlisted articles may have their body downloaded per run.
+BODY_FETCH_MAX = int(os.environ.get("BODY_FETCH_MAX", "300"))
 
 # Always keep these feeds in the public pool (guest “随便看看”).
 PREVIEW_SOURCE_NAMES = {
@@ -119,26 +123,35 @@ def load_user_keywords(sb: Client) -> dict[str, list[dict[str, Any]]]:
 
 def matching_keyword_rows(
     article: dict[str, Any], user_keywords: dict[str, list[dict[str, Any]]]
-) -> list[tuple[str, dict[str, Any]]]:
-    """Stage-1 recall: (user_id, keyword_row) pairs."""
-    out: list[tuple[str, dict[str, Any]]] = []
+) -> list[tuple[str, dict[str, Any], int]]:
+    """Shortlist: (user_id, keyword_row, recall_score) for keywords with any term present."""
+    out: list[tuple[str, dict[str, Any], int]] = []
     for uid, rows in user_keywords.items():
         for row in rows:
-            if stage1_match(article, row):
-                out.append((uid, row))
+            score = recall_score(article, row)
+            if score > 0:
+                out.append((uid, row, score))
     return out
 
 
 def upsert_articles(sb: Client, articles: list[dict[str, Any]]) -> int:
+    """Store articles, dropping `body` when migration 014 has not been applied yet."""
     if not articles:
         return 0
-    total = 0
-    chunk_size = 100
-    for i in range(0, len(articles), chunk_size):
-        chunk = articles[i : i + chunk_size]
-        result = sb.table("articles").upsert(chunk, on_conflict="url").execute()
-        total += len(result.data or chunk)
-    return total
+
+    def write(rows: list[dict[str, Any]]) -> int:
+        total = 0
+        for i in range(0, len(rows), 100):
+            chunk = rows[i : i + 100]
+            result = sb.table("articles").upsert(chunk, on_conflict="url").execute()
+            total += len(result.data or chunk)
+        return total
+
+    try:
+        return write(articles)
+    except Exception as exc:  # noqa: BLE001
+        print(f"article upsert with body failed ({exc}); retrying without body")
+        return write([{k: v for k, v in a.items() if k != "body"} for a in articles])
 
 
 def resolve_article_ids(sb: Client, urls: list[str]) -> dict[str, str]:
@@ -216,8 +229,8 @@ def crawl() -> None:
     preview_articles: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
     scanned = 0
-    # url -> stage-1 (user_id, keyword_row) pairs
-    url_kw_hits: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    # url -> shortlisted (user_id, keyword_row, recall_score) triples
+    url_kw_hits: dict[str, list[tuple[str, dict[str, Any], int]]] = {}
 
     for source in FEED_SOURCES:
         try:
@@ -243,14 +256,31 @@ def crawl() -> None:
 
             if not user_keywords:
                 continue
-            kw_hits = matching_keyword_rows(article, user_keywords)
-            if not kw_hits:
+            # Pass 1 on title + summary: cheap, and decides whose body is worth downloading.
+            if not matching_keyword_rows(article, user_keywords):
                 continue
             candidates.append(article)
-            url_kw_hits[url] = kw_hits
 
     if not user_keywords:
         print("No keywords (or AI terms) yet — keeping guest preview pool only.")
+
+    candidates = candidates[:500]
+
+    # Download the bodies, then redo recall over the full text. An RSS summary is a few
+    # hundred characters; terms regularly appear only further down the article.
+    body_targets = [a["url"] for a in candidates][:BODY_FETCH_MAX]
+    bodies = fetch_bodies(body_targets)
+    for article in candidates:
+        body = bodies.get(article["url"], "")
+        if body:
+            article["body"] = body
+    print(f"Bodies fetched {len(bodies)}/{len(body_targets)}")
+
+    for article in candidates:
+        hits = matching_keyword_rows(article, user_keywords)
+        if hits:
+            url_kw_hits[article["url"]] = hits
+    candidates = [a for a in candidates if a["url"] in url_kw_hits]
 
     # Public movie/culture pool for guests (dedupe against keyword matches).
     preview_by_url = {a["url"]: a for a in preview_articles}
@@ -258,7 +288,6 @@ def crawl() -> None:
         preview_by_url.pop(a["url"], None)
     preview_only = list(preview_by_url.values())[:200]
 
-    candidates = candidates[:500]
     count = upsert_articles(sb, candidates + preview_only)
     id_by_url = resolve_article_ids(
         sb, [a["url"] for a in candidates] + [a["url"] for a in preview_only]
@@ -270,7 +299,7 @@ def crawl() -> None:
         aid = id_by_url.get(url)
         if not aid:
             continue
-        for uid, row in url_kw_hits.get(url, []):
+        for uid, row, score in url_kw_hits.get(url, []):
             kid = row.get("id")
             if not kid:
                 continue
@@ -281,10 +310,13 @@ def crawl() -> None:
                     "keyword_phrase": row.get("phrase") or "",
                     "match_mode": row.get("match_mode") or "",
                     "match_groups": row.get("match_groups"),
+                    "search_terms": row.get("search_terms"),
                     "exclude_terms": row.get("exclude_terms"),
                     "article_id": aid,
                     "title": article.get("title") or "",
                     "summary": article.get("summary") or "",
+                    "body": article.get("body") or "",
+                    "recall": score,
                 }
             )
 
