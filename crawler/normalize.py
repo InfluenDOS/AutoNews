@@ -644,13 +644,42 @@ def suggest_match_mode(phrase: str) -> str:
 
 
 def haystack_for_article(article: dict[str, Any]) -> tuple[str, str]:
+    """Every piece of text we hold for the article, raw and normalized.
+
+    The body is included when the crawl managed to fetch it: an RSS summary is a few
+    hundred characters, the body a few thousand, and terms often only appear in the latter.
+    """
     hay = f"{article.get('title', '')} {article.get('summary', '')}"
     normalized = article.get("raw_text_normalized") or normalize_for_match(hay)
+    body = (article.get("body") or "").strip()
+    if body:
+        hay = f"{hay} {body}"
+        normalized = f"{normalized} {normalize_for_match(body)}"
     return hay, normalized
 
 
 def phrase_hits(hay: str, normalized: str, phrase: str) -> bool:
     return matches_keyword(normalized, phrase) or matches_keyword(hay, phrase)
+
+
+def recall_score(article: dict[str, Any], row: dict[str, Any]) -> int:
+    """How much of the keyword's intent is visible anywhere in the article.
+
+    Counts facets — aspects of the intent — rather than surface variants, so a keyword
+    with many synonyms per facet does not outrank one with few. Deliberately generous:
+    a single facet is enough to shortlist. This only decides whether an article is worth
+    an LLM call, never whether it is relevant, so recall matters here and precision does
+    not; ranking by the count spends a limited scoring budget on the best candidates first.
+    """
+    hay, normalized = haystack_for_article(article)
+    groups = clean_match_groups(row.get("match_groups"))
+    hits = sum(
+        1 for g in groups if any(phrase_hits(hay, normalized, alt) for alt in g)
+    )
+    if hits:
+        return hits
+    terms = expand_match_terms(row.get("phrase") or "", row.get("search_terms") or [])
+    return sum(1 for term in terms if phrase_hits(hay, normalized, term))
 
 
 def score_facets(

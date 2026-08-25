@@ -8,6 +8,7 @@ from normalize import (
     article_matches_keyword_row,
     clean_match_groups,
     matches_token,
+    recall_score,
     term_weight,
 )
 
@@ -191,6 +192,55 @@ check(
     article_matches_keyword_row(
         art("Kineske investicije u Mađarskoj"), TWO_FACETS, recall=True
     ),
+    True,
+)
+
+
+# --- Recall shortlist: generous on purpose, and body-aware ---------------------
+
+CHINA_SERBIA = {
+    "phrase": "中国在塞尔维亚的投资",
+    "match_groups": [["kineski", "kineska", "Kina"], ["Srbija", "Srbiji"]],
+    "match_mode": "strict",
+}
+
+check(
+    "recall counts every term that appears",
+    recall_score(art("Kineske investicije u Srbiji dostigle rekord"), CHINA_SERBIA),
+    2,
+)
+check(
+    "recall shortlists on a single term the strict rule would reject",
+    recall_score(art("Kineske investicije u Mađarskoj"), CHINA_SERBIA) > 0,
+    True,
+)
+check(
+    "recall stays out when nothing appears",
+    recall_score(art("Poplave u Novom Sadu"), CHINA_SERBIA),
+    0,
+)
+
+# The body is where terms usually live: an RSS summary is one truncated sentence.
+BODY_ONLY = {
+    "title": "Potpisan sporazum o saradnji",
+    "summary": "Sporazum je potpisan u ponedeljak.",
+    "body": "U Pekingu je potpisan sporazum između kineske kompanije i Vlade Srbije.",
+}
+check(
+    "title and summary alone miss the terms",
+    recall_score(
+        {k: v for k, v in BODY_ONLY.items() if k != "body"}, CHINA_SERBIA
+    ),
+    0,
+)
+check(
+    "body brings both facets into recall",
+    recall_score(BODY_ONLY, CHINA_SERBIA),
+    2,
+)
+check(
+    "body lets the strict rule match too",
+    article_matches_keyword_row(BODY_ONLY, CHINA_SERBIA),
     True,
 )
 
