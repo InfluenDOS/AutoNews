@@ -46,12 +46,13 @@ jobs:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
           AI_MODEL: ${{ secrets.AI_MODEL }}
-          # Relevance now reads article bodies: smaller batches, but it decides every
-          # shortlisted pair rather than only multi-facet keywords. Verdicts are cached
-          # per (keyword, article), so steady-state cost is just newly published articles.
+          # Serbia-news pipeline: bulk RSS shortlist, then AI reads bodies and
+          # decides every (keyword, article) pair. Verdicts are cached so
+          # steady-state cost is just newly published articles.
           RELEVANCE_BATCH_SIZE: "6"
-          RELEVANCE_MAX_PER_RUN: "240"
-          BODY_FETCH_MAX: "300"
+          RELEVANCE_MAX_PER_RUN: "400"
+          BODY_FETCH_MAX: "500"
+          CANDIDATE_STORE_MAX: "800"
           BODY_FETCH_CONCURRENCY: "12"
         run: |
           export AI_BASE_URL="${AI_BASE_URL:-https://api.deepseek.com}"

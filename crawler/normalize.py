@@ -679,37 +679,37 @@ def _is_location_group(group: list[str]) -> bool:
 
 
 def recall_score(article: dict[str, Any], row: dict[str, Any]) -> int:
-    """How much of the keyword's *topic* is visible anywhere in the article.
+    """Broad shortlist score: any facet / any search term → candidate for the model.
 
-    Location facets (`Srbija`, `Beograd`) are almost always true of Balkan domestic news,
-    so they rank a candidate but cannot shortlist it when the keyword also has a topic
-    facet. Otherwise a "Serbian PM" subscription would send every flood and sports story
-    to the model. A keyword that *is* just a place (the user subscribed to Serbia) still
-    shortlists on the place.
+    Serbia-news pipeline: crawl casts a wide net, then the LLM decides relevance.
+    Rules only answer "is this worth an AI call?", never "is it on topic?".
 
-    Ranking: topic hits are worth ten location hits, so a limited scoring budget is spent
-    on the strongest candidates first. This never decides relevance — only whether the
-    article is worth an LLM call.
+    Wrong-sense excludes are intentionally NOT applied here — stem overlap can make
+    `premijera` (premiere) veto a real `premijer` (PM) hit. Excludes stay on the
+    strict rule path / AI prompt. Ranking prefers topic hits over bare place names
+    so a limited AI budget is spent on stronger candidates first — but a place-only
+    hit still shortlists (score > 0) so the model can see it.
     """
     hay, normalized = haystack_for_article(article)
     groups = [g for g in clean_match_groups(row.get("match_groups")) if g]
     if groups:
         hits = [any(phrase_hits(hay, normalized, alt) for alt in g) for g in groups]
+        if not any(hits):
+            return 0
         topic = [i for i, g in enumerate(groups) if not _is_location_group(g)]
-        if topic:
-            topic_hits = sum(1 for i in topic if hits[i])
-            if not topic_hits:
-                return 0
-            place_hits = sum(1 for i, h in enumerate(hits) if h and i not in topic)
-            return topic_hits * 10 + place_hits
-        return sum(1 for h in hits if h)
+        topic_hits = sum(1 for i in topic if hits[i]) if topic else 0
+        place_hits = sum(1 for i, h in enumerate(hits) if h and i not in set(topic))
+        # No topic facets (place-only keyword) → count every hit equally.
+        if not topic:
+            return sum(1 for h in hits if h)
+        return topic_hits * 10 + place_hits
 
     terms = expand_match_terms(row.get("phrase") or "", row.get("search_terms") or [])
     if not terms:
         return 0
-    specific = [t for t in terms if term_weight(t) >= SELF_SUFFICIENT_WEIGHT]
-    pool = specific or terms
-    return sum(1 for term in pool if phrase_hits(hay, normalized, term))
+    # Broad OR across every expanded term — including generics like "Srbija".
+    # Precision is the model's job downstream.
+    return sum(1 for term in terms if phrase_hits(hay, normalized, term))
 
 
 def score_facets(

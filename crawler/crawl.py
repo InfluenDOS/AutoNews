@@ -1,4 +1,13 @@
-"""Fetch Serbian media RSS feeds; store articles and cumulative per-user keyword hits."""
+"""Serbia / Balkan RSS crawl: bulk ingest first, AI decides keyword relevance.
+
+Pipeline (same idea as the original staged Serbia-news matcher):
+  1. Scan every feed and keep a large recent pool.
+  2. Broad keyword shortlist (any facet / any search term) — rules only cast a net.
+  3. Download bodies for as many candidates as the budget allows.
+  4. Re-shortlist over title + summary + body.
+  5. LLM reads the body and decides whether each pair is actually on-topic.
+  6. Only AI-approved pairs become permanent article_hits.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +31,9 @@ from sources import FEED_SOURCES
 USER_AGENT = "AutoNewsBot/1.0 (+https://github.com/AutoNews; RSS aggregator)"
 
 # How many shortlisted articles may have their body downloaded per run.
-BODY_FETCH_MAX = int(os.environ.get("BODY_FETCH_MAX", "300"))
+BODY_FETCH_MAX = int(os.environ.get("BODY_FETCH_MAX", "500"))
+# Cap on articles stored as keyword candidates this run (preview pool is separate).
+CANDIDATE_STORE_MAX = int(os.environ.get("CANDIDATE_STORE_MAX", "800"))
 
 # Always keep these feeds in the public pool (guest “随便看看”).
 PREVIEW_SOURCE_NAMES = {
@@ -124,7 +135,7 @@ def load_user_keywords(sb: Client) -> dict[str, list[dict[str, Any]]]:
 def matching_keyword_rows(
     article: dict[str, Any], user_keywords: dict[str, list[dict[str, Any]]]
 ) -> list[tuple[str, dict[str, Any], int]]:
-    """Shortlist: (user_id, keyword_row, recall_score) for keywords whose topic is visible."""
+    """Broad shortlist: (user_id, keyword_row, recall_score) for any visible term."""
     out: list[tuple[str, dict[str, Any], int]] = []
     for uid, rows in user_keywords.items():
         for row in rows:
@@ -233,11 +244,10 @@ def crawl() -> None:
         sb,
         step="crawl",
         status="running",
-        detail="正在抓取 RSS 并匹配关键词…",
+        detail="正在大量抓取 RSS，随后由 AI 判定关键词相关性…",
         from_statuses=["queued", "running"],
     )
 
-    candidates: list[dict[str, Any]] = []
     pool: list[dict[str, Any]] = []
     preview_articles: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
@@ -245,6 +255,7 @@ def crawl() -> None:
     # url -> shortlisted (user_id, keyword_row, recall_score) triples
     url_kw_hits: dict[str, list[tuple[str, dict[str, Any], int]]] = {}
 
+    # ——— Pass 0: bulk scan every feed into a recent pool ———
     for source in FEED_SOURCES:
         try:
             feed = fetch_feed(source.url)
@@ -274,22 +285,30 @@ def crawl() -> None:
     if not user_keywords:
         print("No keywords (or AI terms) yet — keeping guest preview pool only.")
 
-    # Pass 1 on title + summary: distinctive/topic hits go first. Remaining slots
-    # download recent unmatched articles so a term that only appears in the body
-    # (typical of "cooperation signed" headlines) still gets a chance.
-    priority: list[tuple[int, dict[str, Any]]] = []
-    if user_keywords:
+    candidates: list[dict[str, Any]] = []
+    if user_keywords and pool:
+        # Prefer freshest items so a full Balkan scan still fits the store budget.
+        pool.sort(key=lambda a: a.get("published_at") or "", reverse=True)
+
+        # ——— Pass 1: broad shortlist on title + summary (cheap) ———
+        priority: list[tuple[int, dict[str, Any]]] = []
         for article in pool:
             hits = matching_keyword_rows(article, user_keywords)
             score = max((s for _, _, s in hits), default=0)
             if score > 0:
                 priority.append((score, article))
-        priority.sort(key=lambda item: -item[0])
+        # Strongest shortlist first, then newest within the same score.
+        priority.sort(
+            key=lambda item: (item[0], item[1].get("published_at") or ""),
+            reverse=True,
+        )
         priority_articles = [a for _, a in priority]
         priority_urls = {a["url"] for a in priority_articles}
+
+        # Remaining recent articles fill body-fetch slots: terms often live only in the body.
         remainder = [a for a in pool if a["url"] not in priority_urls]
-        remainder.sort(key=lambda a: a.get("published_at") or "", reverse=True)
         fetch_list = (priority_articles + remainder)[:BODY_FETCH_MAX]
+
         bodies = fetch_bodies([a["url"] for a in fetch_list])
         for article in fetch_list:
             body = bodies.get(article["url"], "")
@@ -297,14 +316,28 @@ def crawl() -> None:
                 article["body"] = body
         print(
             f"Bodies fetched {len(bodies)}/{len(fetch_list)} "
-            f"(priority {len(priority_articles)}, remainder fill "
+            f"(broad shortlist {len(priority_articles)}, remainder fill "
             f"{max(0, len(fetch_list) - len(priority_articles))})"
         )
+
+        # ——— Pass 2: re-shortlist over title + summary + body ———
+        rescored: list[tuple[int, dict[str, Any]]] = []
         for article in fetch_list:
             hits = matching_keyword_rows(article, user_keywords)
-            if hits:
-                url_kw_hits[article["url"]] = hits
-                candidates.append(article)
+            if not hits:
+                continue
+            url_kw_hits[article["url"]] = hits
+            score = max(s for _, _, s in hits)
+            rescored.append((score, article))
+        rescored.sort(
+            key=lambda item: (item[0], item[1].get("published_at") or ""),
+            reverse=True,
+        )
+        candidates = [a for _, a in rescored][:CANDIDATE_STORE_MAX]
+        print(
+            f"Bulk pool {len(pool)} · title shortlist {len(priority_articles)} · "
+            f"body shortlist {len(rescored)} · storing {len(candidates)}"
+        )
 
     # Public movie/culture pool for guests (dedupe against keyword matches).
     preview_by_url = {a["url"]: a for a in preview_articles}
@@ -344,6 +377,7 @@ def crawl() -> None:
                 }
             )
 
+    # ——— Pass 3: AI decides relevance; keywords never write hits by themselves ———
     hits = filter_matches_with_relevance(sb, matches=stage1_matches)
     inserted = merge_hits(sb, hits)
     # Only prune this-run keyword candidates that never became hits.
@@ -384,7 +418,7 @@ def crawl() -> None:
         sb,
         step="crawl",
         status="done",
-        detail=f"完成 · 匹配 {len(candidates)} 篇 · hits {inserted}",
+        detail=f"完成 · 候选 {len(candidates)} 篇 · AI 通过 hits {inserted}",
         meta={
             "counts": {
                 "matched": len(candidates),
@@ -405,7 +439,7 @@ def crawl() -> None:
             phrases_by_user=phrases_by_user,
         )
     print(
-        f"Scanned {scanned} · matched articles {len(candidates)} · preview kept {len(preview_only)} · "
+        f"Scanned {scanned} · candidate articles {len(candidates)} · preview kept {len(preview_only)} · "
         f"upserted {count} · hits merged {inserted} · pruned unmatched {removed}"
     )
 
