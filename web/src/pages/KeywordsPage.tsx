@@ -54,7 +54,6 @@ function isMovieRelated(article: Article): boolean {
     article.summary_zh,
     article.title,
     article.summary,
-    article.raw_text_normalized,
   ]
     .filter(Boolean)
     .join('\n')
@@ -99,9 +98,9 @@ function GuestKeywordsPreview() {
         'title.ilike.%film%',
         'title.ilike.%movie%',
         'title.ilike.%cinema%',
-        'raw_text_normalized.ilike.%film%',
-        'raw_text_normalized.ilike.%movie%',
-        'raw_text_normalized.ilike.%bioskop%',
+        'summary.ilike.%film%',
+        'summary.ilike.%movie%',
+        'summary.ilike.%bioskop%',
         'source.ilike.%variety%',
         'source.ilike.%kultura%',
         'source.ilike.%zabava%',

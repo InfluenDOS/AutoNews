@@ -15,7 +15,7 @@ import type { Keyword } from '../types'
 type KeywordsContextValue = {
   keywords: Keyword[]
   loading: boolean
-  refresh: () => Promise<void>
+  refresh: (opts?: { quiet?: boolean }) => Promise<void>
   addKeyword: (phrase: string) => Promise<{ id?: string; error?: string }>
   deleteKeyword: (id: string) => Promise<{ error?: string }>
 }
@@ -31,13 +31,14 @@ export function KeywordsProvider({ children }: { children: ReactNode }) {
   const [keywords, setKeywords] = useState<Keyword[]>([])
   const [loading, setLoading] = useState(false)
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!user || !isSupabaseConfigured) {
       setKeywords([])
       setLoading(false)
       return
     }
-    setLoading(true)
+    // Avoid blanking the feed on background polls (AI expand / interval refresh).
+    if (!opts?.quiet) setLoading(true)
     const { data, error } = await supabase
       .from('keywords')
       .select('*')
@@ -55,7 +56,7 @@ export function KeywordsProvider({ children }: { children: ReactNode }) {
   // Poll faster while AI expand is pending
   useEffect(() => {
     if (!user || !keywords.some(isAiPending)) return
-    const id = window.setInterval(() => void refresh(), 3_000)
+    const id = window.setInterval(() => void refresh({ quiet: true }), 3_000)
     return () => window.clearInterval(id)
   }, [user, keywords, refresh])
 

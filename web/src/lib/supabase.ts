@@ -10,9 +10,10 @@ export const supabase: SupabaseClient = isSupabaseConfigured
   : (null as unknown as SupabaseClient)
 
 /**
- * Columns for article lists. Spelled out rather than `*` to leave `body` on the server:
- * it holds the full extracted source text, which lists never render and which would add
- * megabytes to a 200-article response.
+ * Columns for article lists. Spelled out rather than `*` to leave heavy text on the server:
+ * `body` is the full extracted source, and `raw_text_normalized` is the match corpus —
+ * lists never render either, and including them made multi-thousand-hit feeds unloadable.
+ * Client-side rule fallbacks still work from title + summary when no relevance verdict exists.
  */
 export const ARTICLE_LIST_COLUMNS =
-  'id, source, title, summary, title_zh, summary_zh, lead_zh, url, published_at, raw_text_normalized, created_at'
+  'id, source, title, summary, title_zh, summary_zh, lead_zh, url, published_at, created_at'
