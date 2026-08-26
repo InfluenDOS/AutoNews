@@ -9,7 +9,7 @@ export type Article = {
   body_zh?: string
   url: string
   published_at: string | null
-  raw_text_normalized: string
+  raw_text_normalized?: string
   created_at: string
 }
 

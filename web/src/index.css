@@ -73,10 +73,11 @@ textarea {
   inset: -4%;
   background:
     linear-gradient(120deg, rgba(8, 18, 12, 0.35), rgba(8, 18, 12, 0.15)),
-    url('https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=2400&q=80')
+    url('https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1400&q=70')
       center / cover no-repeat;
   transform: scale(1.04);
   animation: drift 28s ease-in-out infinite alternate;
+  will-change: transform;
 }
 
 .stage-shade {
@@ -91,8 +92,9 @@ textarea {
 .stage-blob {
   position: absolute;
   border-radius: 50%;
-  filter: blur(60px);
-  opacity: 0.45;
+  filter: blur(40px);
+  opacity: 0.4;
+  contain: strict;
 }
 
 .stage-blob-a {
@@ -129,8 +131,8 @@ textarea {
   padding: 0;
   border-right: 1px solid var(--line);
   background: var(--side-bg);
-  backdrop-filter: blur(28px) saturate(1.35);
-  -webkit-backdrop-filter: blur(28px) saturate(1.35);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
   animation: rise 0.7s ease both;
   overflow: visible;
 }
@@ -185,8 +187,8 @@ textarea {
   border-left-color: transparent;
   border-radius: 0 12px 12px 0;
   background: var(--side-bg);
-  backdrop-filter: blur(28px) saturate(1.35);
-  -webkit-backdrop-filter: blur(28px) saturate(1.35);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
   box-shadow: 4px 0 18px rgba(0, 0, 0, 0.18);
   transition:
     border-radius 0.36s var(--side-ease),
@@ -964,8 +966,8 @@ textarea {
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.07);
-  backdrop-filter: blur(24px) saturate(1.4);
-  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
 }
 
@@ -1041,8 +1043,8 @@ textarea {
   border-radius: calc(var(--radius) + 4px);
   border: 1px solid var(--line);
   background: var(--glass);
-  backdrop-filter: blur(28px) saturate(1.35);
-  -webkit-backdrop-filter: blur(28px) saturate(1.35);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.3);
   padding: 1.35rem 1.5rem 1.1rem;
   animation: rise 0.9s 0.12s ease both;
@@ -1074,6 +1076,8 @@ textarea {
   padding: 1.15rem 0.15rem;
   border-bottom: 1px solid var(--line-soft);
   transition: background 0.25s ease, transform 0.25s ease;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 140px;
 }
 
 .story:last-child {
@@ -1193,6 +1197,21 @@ textarea {
 .btn-ghost:hover:not(:disabled) {
   color: var(--ink);
   background: rgba(255, 255, 255, 0.06);
+}
+
+.feed-more {
+  display: flex;
+  justify-content: center;
+  padding: 1.25rem 0 0.35rem;
+}
+
+.feed-more-btn {
+  min-width: 10rem;
+}
+
+.feed-more-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .btn-sm {
@@ -1326,8 +1345,8 @@ textarea {
   border-radius: calc(var(--radius) + 4px);
   border: 1px solid var(--line);
   background: var(--glass-strong);
-  backdrop-filter: blur(28px) saturate(1.35);
-  -webkit-backdrop-filter: blur(28px) saturate(1.35);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.3);
   padding: 1.5rem 1.6rem;
   animation: rise 0.75s ease both;
