@@ -10,13 +10,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from crawl import (  # noqa: E402
-    PREVIEW_SOURCE_NAMES,
     entry_to_article,
     fetch_feed,
     get_supabase,
     upsert_articles,
 )
-from sources import FEED_SOURCES  # noqa: E402
+from sources import FEED_SOURCES, PREVIEW_SOURCE_NAMES  # noqa: E402
 
 
 def main() -> None:

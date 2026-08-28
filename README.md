@@ -2,7 +2,8 @@
 
 Subscribe to news by keyword, get Chinese briefs, and star favorites.
 Frontend on GitHub Pages; data and auth on Supabase; RSS crawl via GitHub Actions.
-Current default feeds include Serbian mainstream media and can be extended.
+Current default feeds are Serbian mainstream news (plus Balkan Insight). Culture /
+Hollywood feeds are guest preview only and are not keyword-matched.
 
 ## Architecture
 
@@ -98,12 +99,19 @@ In the GitHub repo: **Settings → Secrets and variables → Actions**, add:
 
 ## RSS sources
 
-Configured in [`crawler/sources.py`](crawler/sources.py):
+Configured in [`crawler/sources.py`](crawler/sources.py).
 
-- Blic
+**Keyword crawl (news):**
+
+- Blic / Blic Politika
 - B92
 - RTS
 - Novosti
+- N1 Serbia
+- Danas
+- Balkan Insight
+
+**Guest preview only (not matched to subscriptions):** Blic Kultura, Blic Zabava, B92 Kultura, Novosti Kultura, Variety.
 
 ## License / copyright
 

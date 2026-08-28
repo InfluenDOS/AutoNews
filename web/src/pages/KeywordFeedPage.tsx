@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useJobs } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
 import { articleMatchesKeyword } from '../lib/normalize'
+import { isNewsSource } from '../lib/sources'
 import { ARTICLE_LIST_COLUMNS, isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Article, Keyword } from '../types'
 
@@ -202,7 +203,7 @@ export function KeywordFeedPage({ all = false }: Props) {
 
         for (const row of rows) {
           const a = unwrapArticle(row.articles)
-          if (!a || seen.has(a.id)) continue
+          if (!a || seen.has(a.id) || !isNewsSource(a.source)) continue
           seen.add(a.id)
           list.push(a)
           relMap.set(`${kid}:${a.id}`, true)
@@ -224,7 +225,7 @@ export function KeywordFeedPage({ all = false }: Props) {
           const hitTimes = new Map<string, number>()
           for (const hit of (hitRows as HitRow[]) ?? []) {
             const a = unwrapArticle(hit.articles)
-            if (!a || seen.has(a.id)) continue
+            if (!a || seen.has(a.id) || !isNewsSource(a.source)) continue
             pageArticles.push(a)
             const t = Date.parse(hit.created_at || '') || 0
             if (t > 0) hitTimes.set(a.id, t)
@@ -278,7 +279,7 @@ export function KeywordFeedPage({ all = false }: Props) {
         const pageArticles: Article[] = []
         for (const hit of rows) {
           const a = unwrapArticle(hit.articles)
-          if (!a || seen.has(a.id)) continue
+          if (!a || seen.has(a.id) || !isNewsSource(a.source)) continue
           seen.add(a.id)
           pageArticles.push(a)
           const t = Date.parse(hit.created_at || '') || 0
