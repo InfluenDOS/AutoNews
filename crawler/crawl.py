@@ -1,12 +1,14 @@
-"""Serbia / Balkan RSS crawl: bulk ingest first, AI decides keyword relevance.
+"""Serbian RSS crawl: news sources only, topic shortlist, then AI relevance.
 
-Pipeline (same idea as the original staged Serbia-news matcher):
-  1. Scan every feed and keep a large recent pool.
-  2. Broad keyword shortlist (any facet / any search term) — rules only cast a net.
+Pipeline:
+  1. Scan Serbian (and Serbia-focused) news feeds into a recent pool.
+     Culture / Hollywood preview feeds are stored separately and never matched.
+  2. Topic shortlist (a place name alone cannot carry a multi-facet keyword).
   3. Download bodies for as many candidates as the budget allows.
   4. Re-shortlist over title + summary + body.
   5. LLM reads the body and decides whether each pair is actually on-topic.
-  6. Only AI-approved pairs become permanent article_hits.
+  6. Only approved pairs become permanent article_hits.
+  7. Retract historical hits that the new gates would never accept.
 """
 
 from __future__ import annotations
@@ -23,26 +25,17 @@ from supabase import Client, create_client
 
 from extract import fetch_bodies
 from normalize import normalize_for_match, recall_score
-from relevance import filter_matches_with_relevance
+from relevance import filter_matches_with_relevance, retract_stale_feed
 from jobs import ensure_crawl_jobs, ensure_translate_jobs, mark_jobs
-from sources import FEED_SOURCES
+from sources import FEED_SOURCES, PREVIEW_SOURCE_NAMES, is_news_source
 
 
 USER_AGENT = "AutoNewsBot/1.0 (+https://github.com/AutoNews; RSS aggregator)"
 
 # How many shortlisted articles may have their body downloaded per run.
-BODY_FETCH_MAX = int(os.environ.get("BODY_FETCH_MAX", "500"))
+BODY_FETCH_MAX = int(os.environ.get("BODY_FETCH_MAX", "300"))
 # Cap on articles stored as keyword candidates this run (preview pool is separate).
-CANDIDATE_STORE_MAX = int(os.environ.get("CANDIDATE_STORE_MAX", "800"))
-
-# Always keep these feeds in the public pool (guest “随便看看”).
-PREVIEW_SOURCE_NAMES = {
-    "Blic Kultura",
-    "Blic Zabava",
-    "B92 Kultura",
-    "Novosti Kultura",
-    "Variety",
-}
+CANDIDATE_STORE_MAX = int(os.environ.get("CANDIDATE_STORE_MAX", "400"))
 
 
 def get_supabase() -> Client:
@@ -135,7 +128,7 @@ def load_user_keywords(sb: Client) -> dict[str, list[dict[str, Any]]]:
 def matching_keyword_rows(
     article: dict[str, Any], user_keywords: dict[str, list[dict[str, Any]]]
 ) -> list[tuple[str, dict[str, Any], int]]:
-    """Broad shortlist: (user_id, keyword_row, recall_score) for any visible term."""
+    """Topic shortlist: (user_id, keyword_row, recall_score). Place-only is not enough."""
     out: list[tuple[str, dict[str, Any], int]] = []
     for uid, rows in user_keywords.items():
         for row in rows:
@@ -244,7 +237,7 @@ def crawl() -> None:
         sb,
         step="crawl",
         status="running",
-        detail="正在大量抓取 RSS，随后由 AI 判定关键词相关性…",
+        detail="正在抓取塞尔维亚新闻 RSS，随后由 AI 判定关键词相关性…",
         from_statuses=["queued", "running"],
     )
 
@@ -255,7 +248,7 @@ def crawl() -> None:
     # url -> shortlisted (user_id, keyword_row, recall_score) triples
     url_kw_hits: dict[str, list[tuple[str, dict[str, Any], int]]] = {}
 
-    # ——— Pass 0: bulk scan every feed into a recent pool ———
+    # ——— Pass 0: scan news feeds into the keyword pool; preview feeds stay separate ———
     for source in FEED_SOURCES:
         try:
             feed = fetch_feed(source.url)
@@ -277,20 +270,21 @@ def crawl() -> None:
 
             if source.name in PREVIEW_SOURCE_NAMES:
                 preview_articles.append(article)
+                continue
 
             if not user_keywords:
                 continue
-            pool.append(article)
+            if is_news_source(source.name):
+                pool.append(article)
 
     if not user_keywords:
         print("No keywords (or AI terms) yet — keeping guest preview pool only.")
 
     candidates: list[dict[str, Any]] = []
     if user_keywords and pool:
-        # Prefer freshest items so a full Balkan scan still fits the store budget.
         pool.sort(key=lambda a: a.get("published_at") or "", reverse=True)
 
-        # ——— Pass 1: broad shortlist on title + summary (cheap) ———
+        # ——— Pass 1: topic shortlist on title + summary (cheap) ———
         priority: list[tuple[int, dict[str, Any]]] = []
         for article in pool:
             hits = matching_keyword_rows(article, user_keywords)
@@ -316,7 +310,7 @@ def crawl() -> None:
                 article["body"] = body
         print(
             f"Bodies fetched {len(bodies)}/{len(fetch_list)} "
-            f"(broad shortlist {len(priority_articles)}, remainder fill "
+            f"(topic shortlist {len(priority_articles)}, remainder fill "
             f"{max(0, len(fetch_list) - len(priority_articles))})"
         )
 
@@ -373,6 +367,7 @@ def crawl() -> None:
                     "title": article.get("title") or "",
                     "summary": article.get("summary") or "",
                     "body": article.get("body") or "",
+                    "source": article.get("source") or "",
                     "recall": score,
                 }
             )
@@ -380,6 +375,7 @@ def crawl() -> None:
     # ——— Pass 3: AI decides relevance; keywords never write hits by themselves ———
     hits = filter_matches_with_relevance(sb, matches=stage1_matches)
     inserted = merge_hits(sb, hits)
+    retracted, dropped_stale = retract_stale_feed(sb, user_keywords)
     # Only prune this-run keyword candidates that never became hits.
     # Matched articles (hits) are permanent user feed content — never wiped on crawl.
     candidate_ids = {id_by_url[u] for u in (a["url"] for a in candidates) if u in id_by_url}
@@ -418,7 +414,7 @@ def crawl() -> None:
         sb,
         step="crawl",
         status="done",
-        detail=f"完成 · 候选 {len(candidates)} 篇 · AI 通过 hits {inserted}",
+        detail=f"完成 · 候选 {len(candidates)} 篇 · 新 hits {inserted} · 清理旧误匹配 {dropped_stale}",
         meta={
             "counts": {
                 "matched": len(candidates),
@@ -440,7 +436,8 @@ def crawl() -> None:
         )
     print(
         f"Scanned {scanned} · candidate articles {len(candidates)} · preview kept {len(preview_only)} · "
-        f"upserted {count} · hits merged {inserted} · pruned unmatched {removed}"
+        f"upserted {count} · hits merged {inserted} · pruned unmatched {removed} · "
+        f"retracted {retracted} · stale hits dropped {dropped_stale}"
     )
 
 

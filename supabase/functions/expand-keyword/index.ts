@@ -6,14 +6,15 @@ const corsHeaders: Record<string, string> = {
 }
 
 // Keep in sync with EXPAND_VERSION in crawler/process_ai.py.
-const EXPAND_VERSION = 2
+const EXPAND_VERSION = 3
 
-const EXPAND_SYSTEM = `你是巴尔干多语种新闻检索助手。用户用中文描述订阅意图，你输出用于匹配当地媒体原文的检索结构。
+const EXPAND_SYSTEM = `你是塞尔维亚新闻检索助手。用户用中文描述订阅意图，你输出用于匹配塞尔维亚主流媒体原文的检索结构。
 只输出 JSON：
 {"match_mode":"loose|strict","match_groups":[["variantA","variantB"]],"search_terms":["phrase"],"exclude_terms":["wrongSense"],"ai_note":"一句中文"}
 
 硬性规则：
-1. 一律用目标媒体原文（塞/克/波语拉丁字母、英语），严禁中文。
+1. 一律用目标媒体原文（塞尔维亚语拉丁字母、西里尔对应的拉丁转写、英语），严禁中文。
+   不要输出阿尔巴尼亚语、马其顿语、保加利亚语专有检索词；也不要为邻国本地新闻单独造词。
 2. 每个词都要带常见变格形式：Srbija/Srbiji/Srbijom、kineski/kineskih/kineska。
 3. 消歧优先。若某词在当地语言里多义、或与人名/常用词同形，不要单独给出：
    要么写成消歧的多词短语（用 vlada Srbije 而不是裸 vlada，因为 vlad- 会撞 Vladimir），
@@ -22,7 +23,7 @@ const EXPAND_SYSTEM = `你是巴尔干多语种新闻检索助手。用户用中
    只有用户确实想订阅整个大领域（如「塞尔维亚新闻」）时才给裸单词。
 5. 多要素长意图 → match_mode=strict，match_groups 给 2～4 组核心要素
    （组内是同一要素的多语言/多变格写法，组间要求「基本都要沾边」）。
-6. 只拆真正的核心要素。当地媒体不会逐字重复的语境（本国国名、显而易见的地点）最多占一组；
+6. 只拆真正的核心要素。本国媒体不会逐字重复的语境（本国国名、显而易见的地点）最多占一组；
    程序性细节（被拘留、召开会议、表示关切）不要单独成组，融进要素短语里。
 7. 组数宁少勿多：2～3 组能表达就不要凑到 4 组。
 8. ai_note 用一句中文说明你如何理解该意图；不要 Markdown。`
@@ -389,7 +390,7 @@ Deno.serve(async (req) => {
         const suggested = suggestMatchMode(phrase)
         const raw = await chatJson(
           EXPAND_SYSTEM,
-          `用户输入：${phrase}\n（系统建议 match_mode=${suggested}，长意图请用 strict+match_groups）`,
+          `用户输入：${phrase}\n（系统建议 match_mode=${suggested}；检索词必须是塞尔维亚语/英语原文；长意图请用 strict+match_groups）`,
         )
         expandedPayload = normalizeExpand(phrase, raw)
         const normalized = expandedPayload.search_terms.join(' ').slice(0, 2000) || phrase

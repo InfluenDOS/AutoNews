@@ -11,7 +11,8 @@ from normalize import (
     recall_score,
     term_weight,
 )
-from relevance import rule_confident
+from relevance import item_id, rule_confident, scoring_item, verdict_should_stand
+from sources import NEWS_SOURCE_NAMES, PREVIEW_SOURCE_NAMES, is_news_source
 
 failures: list[str] = []
 
@@ -197,7 +198,7 @@ check(
 )
 
 
-# --- Recall shortlist: broad OR (any facet / any term), topic ranks higher ------
+# --- Recall shortlist: topic facets required, location ranks, body-aware ------
 
 CHINA_SERBIA = {
     "phrase": "中国在塞尔维亚的投资",
@@ -236,14 +237,14 @@ check(
     0,
 )
 check(
-    "place-only still shortlists for a multi-facet keyword (AI decides later)",
-    recall_score(art("Poplave u Srbiji, Novi Sad pod vodom"), PM) > 0,
-    True,
+    "a domestic flood is not a PM story just because it names Serbia",
+    recall_score(art("Poplave u Srbiji, Novi Sad pod vodom"), PM),
+    0,
 )
 check(
-    "place-only still shortlists a China keyword (AI decides later)",
-    recall_score(art("Poplave u Srbiji, Novi Sad pod vodom"), CHINA_SERBIA) > 0,
-    True,
+    "a domestic flood is not a China story just because it names Serbia",
+    recall_score(art("Poplave u Srbiji, Novi Sad pod vodom"), CHINA_SERBIA),
+    0,
 )
 check(
     "the topic facet is enough to shortlist even without the country",
@@ -261,9 +262,9 @@ check(
     0,
 )
 check(
-    "loose search_terms: bare Srbija shortlists for AI (rules stay strict)",
-    recall_score(art("U Srbiji otvoren novi bazen"), LOOSE_WITH_GENERIC) > 0,
-    True,
+    "loose search_terms: bare Srbija does not shortlist a specific election intent",
+    recall_score(art("U Srbiji otvoren novi bazen"), LOOSE_WITH_GENERIC),
+    0,
 )
 
 # The body is where terms usually live: an RSS summary is one truncated sentence.
@@ -300,6 +301,7 @@ BODY_FALSE_FRIEND = {
     "title": "Kijanu Rivs iznenadio izborom omiljenog filma",
     "summary": "Karijera Kijanua Rivsa obuhvata širok spektar filmova.",
     "body": "Premijer Srbije prisustvovao je premijeri filma u Beogradu.",
+    "source": "Blic",
 }
 check(
     "rule fallback ignores a body-only PM mention",
@@ -317,6 +319,93 @@ check(
         PM,
     )
     > 0,
+    True,
+)
+
+
+# --- Source + shortlist gates (entertainment / off-country / place-only) ------
+
+PM_BLIC = {
+    "title": "Premijer Srbije primio delegaciju",
+    "summary": "Predsednica vlade razgovarala je u Beogradu.",
+    "source": "Blic",
+}
+check(
+    "Serbian news PM story may stand",
+    verdict_should_stand(PM_BLIC, PM, source="Blic"),
+    True,
+)
+check(
+    "Variety entertainment never stands for a news keyword",
+    verdict_should_stand(
+        {"title": "Premijer Srbije na premijeri filma", "source": "Variety"},
+        PM,
+        source="Variety",
+    ),
+    False,
+)
+check(
+    "Croatian outlet never stands even with the same lemma",
+    verdict_should_stand(
+        {"title": "Premijer održao konferenciju za medije", "source": "N1 Croatia"},
+        PM,
+        source="N1 Croatia",
+    ),
+    False,
+)
+check(
+    "place-only flood on a news source does not stand for a PM keyword",
+    verdict_should_stand(
+        art("Poplave u Srbiji, Novi Sad pod vodom"), PM, source="Blic"
+    ),
+    False,
+)
+check(
+    "rule fallback accepts a dense PM headline from a news source",
+    rule_confident(
+        {
+            **PM_BLIC,
+            "keyword_phrase": PM["phrase"],
+            "match_mode": PM["match_mode"],
+            "match_groups": PM["match_groups"],
+            "exclude_terms": ["premijera filma", "filmska premijera"],
+        }
+    ),
+    True,
+)
+
+# AI scoring used to KeyError on article_id (matches have no `id`).
+check(
+    "scoring payload reads article_id",
+    item_id({"article_id": "abc", "title": "x"}),
+    "abc",
+)
+check(
+    "scoring payload id field is article_id",
+    scoring_item({"article_id": "abc", "title": "Hello", "body": "World"})["id"],
+    "abc",
+)
+
+check("Variety is preview-only", "Variety" in PREVIEW_SOURCE_NAMES, True)
+check("Variety is not a news source", is_news_source("Variety"), False)
+check("Blic is a news source", is_news_source("Blic"), True)
+check("no preview name leaks into news", PREVIEW_SOURCE_NAMES.isdisjoint(NEWS_SOURCE_NAMES), True)
+check("off-country Jutarnji is not crawled as news", is_news_source("Jutarnji"), False)
+
+CROATIAN_HEADLINE = art("Studenti traže izbore")
+check(
+    "implied-Serbia matching would accept a neighboring-country election lemma",
+    article_matches_keyword_row(CROATIAN_HEADLINE, LOOSE_WITH_GENERIC),
+    True,
+)
+check(
+    "that neighboring-country story is dropped when the outlet is not a news source",
+    verdict_should_stand(CROATIAN_HEADLINE, LOOSE_WITH_GENERIC, source="N1 Croatia"),
+    False,
+)
+check(
+    "the same lemma from a Serbian newsroom may still shortlist",
+    verdict_should_stand(CROATIAN_HEADLINE, LOOSE_WITH_GENERIC, source="Blic"),
     True,
 )
 

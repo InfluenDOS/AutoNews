@@ -19,9 +19,9 @@ from normalize import (
 
 
 # Bumped whenever EXPAND_SYSTEM changes in a way that should re-expand stored keywords.
-EXPAND_VERSION = 2
+EXPAND_VERSION = 3
 
-EXPAND_SYSTEM = """你是巴尔干多语种新闻检索助手。用户用中文描述订阅意图，你输出用于匹配当地媒体原文的检索结构。
+EXPAND_SYSTEM = """你是塞尔维亚新闻检索助手。用户用中文描述订阅意图，你输出用于匹配塞尔维亚主流媒体原文的检索结构。
 只输出 JSON：
 {
   "match_mode": "loose" 或 "strict",
@@ -32,7 +32,8 @@ EXPAND_SYSTEM = """你是巴尔干多语种新闻检索助手。用户用中文�
 }
 
 硬性规则：
-1. 一律用目标媒体原文（塞尔维亚语拉丁字母、克罗地亚语、波斯尼亚语、英语），严禁中文。
+1. 一律用目标媒体原文（塞尔维亚语拉丁字母、西里尔字母对应的拉丁转写、英语），严禁中文。
+   不要输出阿尔巴尼亚语、马其顿语、保加利亚语专有检索词；也不要为邻国本地新闻单独造词。
 2. 每个词都要带常见变格形式：Srbija/Srbiji/Srbijom、kineski/kineskih/kineska、izbori/izbore/izborima。
 3. 消歧优先。若某词在当地语言里多义、或与人名/常用词同形，不要单独给出：
    要么写成消歧的多词短语（用 vlada Srbije 而不是裸 vlada，因为 vlad- 会撞 Vladimir），
@@ -44,7 +45,7 @@ EXPAND_SYSTEM = """你是巴尔干多语种新闻检索助手。用户用中文�
    示例：[["kineski državljani","kineskih državljana","Chinese nationals"],
          ["ilegalni migranti","ilegalne migracije","illegal migrants"],
          ["Srbija","Srbiji","Serbia"]]。
-6. 只拆真正的核心要素。当地媒体不会逐字重复的语境（本国国名、显而易见的地点）最多占一组；
+6. 只拆真正的核心要素。本国媒体不会逐字重复的语境（本国国名、显而易见的地点）最多占一组；
    程序性细节（被拘留、召开会议、表示关切）不要单独成组，融进要素短语里。
 7. 组数宁少勿多：2～3 组能表达就不要凑到 4 组。
 8. ai_note 用一句中文说明你如何理解该意图；不要 Markdown。"""
@@ -100,7 +101,7 @@ def expand_keyword_phrase(phrase: str) -> dict[str, Any]:
         EXPAND_SYSTEM,
         (
             f"用户输入：{phrase}\n"
-            f"（建议 match_mode={suggested}；检索词必须是塞/英等原文，不要中文；"
+            f"（建议 match_mode={suggested}；检索词必须是塞尔维亚语/英语原文，不要中文；"
             f"若意图含地点，match_groups 必须单独有一组地点变体；"
             f"多义词请消歧或写进 exclude_terms）"
         ),
