@@ -6,9 +6,18 @@ function translateAuthError(message: string): string {
   const m = message.toLowerCase()
   if (m.includes('invalid login')) return '邮箱或密码不正确'
   if (m.includes('email not confirmed')) return '请先在邮箱中确认账号，或在 Supabase 关闭邮箱验证'
-  if (m.includes('user already registered')) return '该邮箱已注册，请直接登录'
-  if (m.includes('password')) return '密码不符合要求（至少 6 位）'
+  if (m.includes('user already registered') || m.includes('user_already_registered')) {
+    return '该邮箱已注册，请直接登录'
+  }
+  if (m.includes('password_too_short') || (m.includes('password') && m.includes('short'))) {
+    return '密码不符合要求（至少 6 位）'
+  }
+  if (m.includes('over_email_send_rate_limit') || m.includes('email rate limit')) {
+    return '注册邮件发送太频繁，请约 1 小时后再试'
+  }
   if (m.includes('rate limit')) return '操作太频繁，请稍后再试'
+  if (m.includes('network_error')) return '网络异常，请稍后再试'
+  if (m.includes('signup_failed')) return '注册失败，请稍后再试'
   if (m.includes('supabase is not configured')) {
     return '尚未配置 Supabase，请设置 VITE_SUPABASE_URL 与 VITE_SUPABASE_ANON_KEY'
   }
@@ -51,7 +60,7 @@ export function AuthPage() {
         const { error: err } = await signUp(email.trim(), password)
         if (err) setError(translateAuthError(err))
         else {
-          setMessage('注册成功。若开启了邮箱确认，请先查收邮件再登录。')
+          setMessage('注册成功，请直接登录。')
           setMode('signin')
           setEnterKey((k) => k + 1)
         }

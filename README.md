@@ -72,6 +72,7 @@ In the GitHub repo: **Settings → Secrets and variables → Actions**, add:
 | `AI_MODEL` | 可选，默认 `deepseek-chat` |
 | `VITE_SUPABASE_URL` | Pages deploy workflow |
 | `VITE_SUPABASE_ANON_KEY` | Pages deploy workflow |
+| `SUPABASE_ACCESS_TOKEN` | Optional: Supabase auth config + Edge Function deploy ([create token](https://supabase.com/dashboard/account/tokens)) |
 
 ## 5. GitHub Pages
 

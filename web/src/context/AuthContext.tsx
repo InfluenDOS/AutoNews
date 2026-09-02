@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
-import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { isSupabaseConfigured, supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabase'
 
 type AuthContextValue = {
   user: User | null
@@ -57,8 +57,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!isSupabaseConfigured) {
       return { error: '尚未配置 Supabase，请设置 VITE_SUPABASE_URL 与 VITE_SUPABASE_ANON_KEY' }
     }
-    const { error } = await supabase.auth.signUp({ email, password })
-    return { error: error?.message ?? null }
+    try {
+      const resp = await fetch(`${supabaseUrl}/functions/v1/web-signup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${supabaseAnonKey}`,
+        },
+        body: JSON.stringify({ email: email.trim(), password }),
+      })
+      const json = (await resp.json()) as { error?: string; message?: string }
+      if (resp.status === 404) {
+        const { error } = await supabase.auth.signUp({ email, password })
+        return { error: error?.message ?? null }
+      }
+      if (!resp.ok) {
+        return { error: json.message ?? json.error ?? 'signup_failed' }
+      }
+      return { error: null }
+    } catch {
+      return { error: 'network_error' }
+    }
   }, [])
 
   const signIn = useCallback(async (email: string, password: string) => {

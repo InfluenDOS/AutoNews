@@ -1,0 +1,36 @@
+name: Admin register user (no email)
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: User email
+        required: true
+        type: string
+      password:
+        description: Temporary password (min 6 chars)
+        required: true
+        type: string
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create confirmed user via admin API
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EMAIL: ${{ github.event.inputs.email }}
+          PASSWORD: ${{ github.event.inputs.password }}
+        run: |
+          set -euo pipefail
+          curl -sS -X POST "${SUPABASE_URL}/auth/v1/admin/users" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\",\"email_confirm\":true}" | tee /tmp/register.json
+          if jq -e '.msg? // .message? // empty' /tmp/register.json | grep -qi error; then
+            cat /tmp/register.json
+            exit 1
+          fi
+          echo "User registered."
