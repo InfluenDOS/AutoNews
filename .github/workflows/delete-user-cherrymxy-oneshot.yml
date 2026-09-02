@@ -3,10 +3,11 @@ name: Delete cherrymxy970210 account (one-shot)
 on:
   push:
     branches: [main]
+    paths:
+      - .github/workflows/delete-user-cherrymxy-oneshot.yml
 
 jobs:
   delete:
-    if: github.run_number == 1 || true
     runs-on: ubuntu-latest
     steps:
       - name: Delete cherrymxy970210@gmail.com
