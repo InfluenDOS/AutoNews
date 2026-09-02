@@ -1,0 +1,58 @@
+name: Delete Supabase user
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: Email address of the user to delete
+        required: true
+        type: string
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete user(s) by email
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EMAIL: ${{ github.event.inputs.email }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY repository secret"
+            exit 1
+          fi
+
+          auth_hdr=(-H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}")
+
+          echo "Looking up users for: ${EMAIL}"
+          ids=()
+          page=1
+          while true; do
+            resp=$(curl -sS "${SUPABASE_URL}/auth/v1/admin/users?page=${page}&per_page=200" "${auth_hdr[@]}")
+            batch=$(echo "$resp" | jq -r --arg email "$EMAIL" '.users[]? | select(.email == $email) | .id')
+            if [ -n "$batch" ]; then
+              while IFS= read -r id; do
+                [ -n "$id" ] && ids+=("$id")
+              done <<< "$batch"
+            fi
+            total=$(echo "$resp" | jq -r '.total // 0')
+            if [ "$((page * 200))" -ge "$total" ] || [ "$total" -eq 0 ]; then
+              break
+            fi
+            page=$((page + 1))
+          done
+
+          if [ "${#ids[@]}" -eq 0 ]; then
+            echo "No users found for ${EMAIL}"
+            exit 0
+          fi
+
+          for id in "${ids[@]}"; do
+            echo "Deleting user ${id} (${EMAIL})"
+            curl -sS -X DELETE "${SUPABASE_URL}/auth/v1/admin/users/${id}" "${auth_hdr[@]}"
+            echo
+          done
+
+          echo "Done. Deleted ${#ids[@]} account(s)."
