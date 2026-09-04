@@ -260,6 +260,129 @@ def _has_body_column(sb: Any) -> bool:
         return False
 
 
+def article_needs_zh(row: dict[str, Any], *, with_body: bool) -> bool:
+    """Match the feed UI: missing title_zh shows「等待中文改写」; also backfill empty body_zh."""
+    if not (row.get("title_zh") or "").strip():
+        return True
+    if with_body and not (row.get("body_zh") or "").strip():
+        return True
+    return False
+
+
+def pick_translate_batch(
+    rows: list[dict[str, Any]],
+    hit_ids: set[str],
+    *,
+    limit: int,
+    with_body: bool,
+    force: bool = False,
+) -> list[dict[str, Any]]:
+    """Prefer keyword-hit articles so preview churn cannot starve the user feed."""
+    pending = rows if force else [r for r in rows if article_needs_zh(r, with_body=with_body)]
+    seen: set[str] = set()
+    ordered: list[dict[str, Any]] = []
+
+    def take(src: list[dict[str, Any]]) -> None:
+        for row in src:
+            rid = str(row.get("id") or "")
+            if not rid or rid in seen:
+                continue
+            seen.add(rid)
+            ordered.append(row)
+            if len(ordered) >= limit:
+                return
+
+    take([r for r in pending if str(r.get("id") or "") in hit_ids])
+    if len(ordered) < limit:
+        take([r for r in pending if str(r.get("id") or "") not in hit_ids])
+    return ordered
+
+
+def _chunked(values: list[str], size: int) -> list[list[str]]:
+    return [values[i : i + size] for i in range(0, len(values), size)]
+
+
+def _select_article_columns(with_body: bool) -> tuple[str, ...]:
+    if with_body:
+        return (
+            "id, title, summary, body, title_zh, body_zh, published_at",
+            "id, title, summary, title_zh, body_zh, published_at",
+        )
+    return (
+        "id, title, summary, body, title_zh, published_at",
+        "id, title, summary, title_zh, published_at",
+    )
+
+
+def _fetch_articles_by_ids(sb: Any, columns: str, ids: list[str]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for chunk in _chunked(ids, 100):
+        if not chunk:
+            continue
+        try:
+            result = sb.table("articles").select(columns).in_("id", chunk).execute()
+            out.extend(result.data or [])
+        except Exception as exc:  # noqa: BLE001
+            print(f"  warn: fetch articles by id failed: {exc}", file=sys.stderr)
+    return out
+
+
+def _fetch_pending_articles(sb: Any, columns: str, *, with_body: bool, limit: int) -> list[dict[str, Any]]:
+    """Load articles missing Chinese fields without a tiny published_at window post-filter."""
+    rows: list[dict[str, Any]] = []
+    # title_zh empty → feed shows「等待中文改写」(columns are NOT NULL DEFAULT '').
+    try:
+        result = (
+            sb.table("articles")
+            .select(columns)
+            .eq("title_zh", "")
+            .order("published_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        rows.extend(result.data or [])
+    except Exception as exc:  # noqa: BLE001
+        print(f"  warn: pending title_zh query failed: {exc}", file=sys.stderr)
+    if with_body:
+        try:
+            result = (
+                sb.table("articles")
+                .select(columns)
+                .eq("body_zh", "")
+                .neq("title_zh", "")
+                .order("published_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            rows.extend(result.data or [])
+        except Exception as exc:  # noqa: BLE001
+            print(f"  warn: pending body_zh query failed: {exc}", file=sys.stderr)
+    return rows
+
+
+def _recent_hit_article_ids(sb: Any, limit: int = 400) -> list[str]:
+    try:
+        result = (
+            sb.table("article_hits")
+            .select("article_id")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"  warn: article_hits lookup failed: {exc}", file=sys.stderr)
+        return []
+    ids: list[str] = []
+    seen: set[str] = set()
+    for row in result.data or []:
+        aid = str(row.get("article_id") or "")
+        if not aid or aid in seen:
+            continue
+        seen.add(aid)
+        ids.append(aid)
+    return ids
+
+
 def translate_one(article: dict[str, Any]) -> dict[str, str] | None:
     # Rewrite from the extracted body when the crawl captured one: an RSS summary is a
     # single truncated sentence, so summaries written from it read as padded restatements.
@@ -274,7 +397,8 @@ def translate_one(article: dict[str, Any]) -> dict[str, str] | None:
             ensure_ascii=False,
         )
     )
-    data = chat_json(TRANSLATE_SYSTEM, user, temperature=0.25)
+    # body_zh is 2–4 paragraphs; 600 tokens often truncates JSON mid-object.
+    data = chat_json(TRANSLATE_SYSTEM, user, temperature=0.25, max_tokens=2200)
     title_zh = str(data.get("title_zh") or "").strip()[:120]
     lead_zh = str(data.get("lead_zh") or "").strip()[:300]
     summary_zh = str(data.get("summary_zh") or "").strip()[:200]
@@ -295,35 +419,64 @@ def translate_one(article: dict[str, Any]) -> dict[str, str] | None:
     }
 
 
-def translate_articles(limit: int = 40, force: bool = False) -> int:
+def translate_articles(limit: int = 80, force: bool = False) -> int:
     sb = get_supabase()
     with_body = _has_body_column(sb)
     # Widest select first; fall back when a migration has not been applied yet.
-    selects = (
-        "id, title, summary, body, title_zh, body_zh" if with_body else "id, title, summary, body, title_zh",
-        "id, title, summary, title_zh, body_zh" if with_body else "id, title, summary, title_zh",
-    )
-    result = None
-    for columns in selects:
+    selects = _select_article_columns(with_body)
+    columns = None
+    for cols in selects:
+        try:
+            sb.table("articles").select(cols).limit(1).execute()
+            columns = cols
+            break
+        except Exception:  # noqa: BLE001
+            continue
+    if not columns:
+        print("Could not select articles columns for translate", file=sys.stderr)
+        return 0
+
+    hit_ids_list = _recent_hit_article_ids(sb, limit=max(400, limit * 5))
+    hit_id_set = set(hit_ids_list)
+    candidates: list[dict[str, Any]] = []
+
+    # 1) Drain keyword-hit backlog first (including older stuck rows outside any recency window).
+    if hit_ids_list:
+        hit_rows = _fetch_articles_by_ids(sb, columns, hit_ids_list)
+        # Preserve hit recency order from article_hits.
+        by_id = {str(r.get("id") or ""): r for r in hit_rows}
+        candidates.extend(by_id[i] for i in hit_ids_list if i in by_id)
+
+    # 2) Fill remaining slots from any pending articles (guest preview etc.).
+    if force:
         try:
             result = (
                 sb.table("articles")
                 .select(columns)
                 .order("published_at", desc=True)
-                .limit(120)
+                .limit(max(limit * 3, 120))
                 .execute()
             )
-            break
-        except Exception:  # noqa: BLE001
-            continue
-    rows = (result.data if result else []) or []
-    if not force:
-        if with_body:
-            rows = [r for r in rows if not (r.get("body_zh") or "").strip()]
-        else:
-            rows = [r for r in rows if not (r.get("title_zh") or "").strip()]
-    rows = rows[:limit]
-    print(f"Articles pending Chinese rewrite: {len(rows)} (force={force}, body_col={with_body})")
+            candidates.extend(result.data or [])
+        except Exception as exc:  # noqa: BLE001
+            print(f"  warn: force retranslate scan failed: {exc}", file=sys.stderr)
+    else:
+        candidates.extend(
+            _fetch_pending_articles(sb, columns, with_body=with_body, limit=max(limit * 3, 120))
+        )
+
+    rows = pick_translate_batch(
+        candidates,
+        hit_id_set,
+        limit=limit,
+        with_body=with_body,
+        force=force,
+    )
+    hit_n = sum(1 for r in rows if str(r.get("id") or "") in hit_id_set)
+    print(
+        f"Articles pending Chinese rewrite: {len(rows)} "
+        f"(force={force}, body_col={with_body}, hits_in_batch={hit_n})"
+    )
     if not rows:
         mark_jobs(
             sb,
