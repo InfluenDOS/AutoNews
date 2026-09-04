@@ -260,6 +260,21 @@ def _has_body_column(sb: Any) -> bool:
         return False
 
 
+def _has_translate_tracking(sb: Any) -> bool:
+    try:
+        sb.table("articles").select("translate_attempts, translate_error").limit(1).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# Keep the per-run AI budget modest; catch-up reuses slots inside this limit.
+TRANSLATE_LIMIT = 40
+# Reserved slots inside TRANSLATE_LIMIT for failures / old deferred hits.
+CATCH_UP_MAX = 8
+CATCH_UP_MARK = "awaiting_catchup"
+
+
 def article_needs_zh(row: dict[str, Any], *, with_body: bool) -> bool:
     """Match the feed UI: missing title_zh shows「等待中文改写」; also backfill empty body_zh."""
     if not (row.get("title_zh") or "").strip():
@@ -269,32 +284,44 @@ def article_needs_zh(row: dict[str, Any], *, with_body: bool) -> bool:
     return False
 
 
+def is_catch_up_row(row: dict[str, Any]) -> bool:
+    """Failed rewrite or previously deferred past the fresh budget."""
+    if int(row.get("translate_attempts") or 0) > 0:
+        return True
+    err = (row.get("translate_error") or "").strip()
+    return bool(err)
+
+
 def pick_translate_batch(
-    rows: list[dict[str, Any]],
-    hit_ids: set[str],
+    fresh_rows: list[dict[str, Any]],
+    catch_up_rows: list[dict[str, Any]],
     *,
-    limit: int,
+    limit: int = TRANSLATE_LIMIT,
+    catch_up_max: int = CATCH_UP_MAX,
     with_body: bool,
     force: bool = False,
 ) -> list[dict[str, Any]]:
-    """Prefer keyword-hit articles so preview churn cannot starve the user feed."""
-    pending = rows if force else [r for r in rows if article_needs_zh(r, with_body=with_body)]
+    """Fresh newest first, but reserve a small catch-up slice for failures / deferred hits."""
+    fresh = fresh_rows if force else [r for r in fresh_rows if article_needs_zh(r, with_body=with_body)]
+    catch_up = (
+        catch_up_rows if force else [r for r in catch_up_rows if article_needs_zh(r, with_body=with_body)]
+    )
     seen: set[str] = set()
     ordered: list[dict[str, Any]] = []
 
-    def take(src: list[dict[str, Any]]) -> None:
+    def take(src: list[dict[str, Any]], cap: int) -> None:
         for row in src:
+            if len(ordered) >= cap:
+                return
             rid = str(row.get("id") or "")
             if not rid or rid in seen:
                 continue
             seen.add(rid)
             ordered.append(row)
-            if len(ordered) >= limit:
-                return
 
-    take([r for r in pending if str(r.get("id") or "") in hit_ids])
-    if len(ordered) < limit:
-        take([r for r in pending if str(r.get("id") or "") not in hit_ids])
+    catch_budget = min(catch_up_max, limit)
+    take(catch_up, catch_budget)
+    take(fresh, limit)
     return ordered
 
 
@@ -302,15 +329,16 @@ def _chunked(values: list[str], size: int) -> list[list[str]]:
     return [values[i : i + size] for i in range(0, len(values), size)]
 
 
-def _select_article_columns(with_body: bool) -> tuple[str, ...]:
+def _select_article_columns(with_body: bool, tracking: bool) -> tuple[str, ...]:
+    track = ", translate_attempts, translate_error" if tracking else ""
     if with_body:
         return (
-            "id, title, summary, body, title_zh, body_zh, published_at",
-            "id, title, summary, title_zh, body_zh, published_at",
+            f"id, title, summary, body, title_zh, body_zh, published_at{track}",
+            f"id, title, summary, title_zh, body_zh, published_at{track}",
         )
     return (
-        "id, title, summary, body, title_zh, published_at",
-        "id, title, summary, title_zh, published_at",
+        f"id, title, summary, body, title_zh, published_at{track}",
+        f"id, title, summary, title_zh, published_at{track}",
     )
 
 
@@ -327,40 +355,7 @@ def _fetch_articles_by_ids(sb: Any, columns: str, ids: list[str]) -> list[dict[s
     return out
 
 
-def _fetch_pending_articles(sb: Any, columns: str, *, with_body: bool, limit: int) -> list[dict[str, Any]]:
-    """Load articles missing Chinese fields without a tiny published_at window post-filter."""
-    rows: list[dict[str, Any]] = []
-    # title_zh empty → feed shows「等待中文改写」(columns are NOT NULL DEFAULT '').
-    try:
-        result = (
-            sb.table("articles")
-            .select(columns)
-            .eq("title_zh", "")
-            .order("published_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
-        rows.extend(result.data or [])
-    except Exception as exc:  # noqa: BLE001
-        print(f"  warn: pending title_zh query failed: {exc}", file=sys.stderr)
-    if with_body:
-        try:
-            result = (
-                sb.table("articles")
-                .select(columns)
-                .eq("body_zh", "")
-                .neq("title_zh", "")
-                .order("published_at", desc=True)
-                .limit(limit)
-                .execute()
-            )
-            rows.extend(result.data or [])
-        except Exception as exc:  # noqa: BLE001
-            print(f"  warn: pending body_zh query failed: {exc}", file=sys.stderr)
-    return rows
-
-
-def _recent_hit_article_ids(sb: Any, limit: int = 400) -> list[str]:
+def _recent_hit_article_ids(sb: Any, limit: int = 200) -> list[str]:
     try:
         result = (
             sb.table("article_hits")
@@ -383,6 +378,107 @@ def _recent_hit_article_ids(sb: Any, limit: int = 400) -> list[str]:
     return ids
 
 
+def _fetch_catch_up_articles(
+    sb: Any,
+    columns: str,
+    *,
+    tracking: bool,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Failures and deferred rows — oldest first, small list only."""
+    if not tracking:
+        return []
+    rows: list[dict[str, Any]] = []
+    try:
+        result = (
+            sb.table("articles")
+            .select(columns)
+            .eq("title_zh", "")
+            .gt("translate_attempts", 0)
+            .order("published_at", desc=False)
+            .limit(limit)
+            .execute()
+        )
+        rows.extend(result.data or [])
+    except Exception as exc:  # noqa: BLE001
+        print(f"  warn: catch-up attempts query failed: {exc}", file=sys.stderr)
+    try:
+        result = (
+            sb.table("articles")
+            .select(columns)
+            .eq("title_zh", "")
+            .eq("translate_error", CATCH_UP_MARK)
+            .order("published_at", desc=False)
+            .limit(limit)
+            .execute()
+        )
+        rows.extend(result.data or [])
+    except Exception as exc:  # noqa: BLE001
+        print(f"  warn: catch-up mark query failed: {exc}", file=sys.stderr)
+    # Dedupe preserving older-first order from the two queries.
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        rid = str(row.get("id") or "")
+        if not rid or rid in seen:
+            continue
+        seen.add(rid)
+        out.append(row)
+    return out
+
+
+def _record_translate_failure(
+    sb: Any,
+    row: dict[str, Any],
+    *,
+    tracking: bool,
+    reason: str,
+) -> None:
+    if not tracking:
+        return
+    rid = row.get("id")
+    if not rid:
+        return
+    attempts = int(row.get("translate_attempts") or 0) + 1
+    try:
+        sb.table("articles").update(
+            {
+                "translate_attempts": attempts,
+                "translate_error": (reason or "rewrite_failed")[:500],
+            }
+        ).eq("id", rid).execute()
+    except Exception as exc:  # noqa: BLE001
+        print(f"  warn: could not record translate failure for {rid}: {exc}", file=sys.stderr)
+
+
+def _mark_catch_up(
+    sb: Any,
+    rows: list[dict[str, Any]],
+    *,
+    tracking: bool,
+    skip_ids: set[str],
+) -> int:
+    """Remember untranslated hits we skipped this run so a later catch-up slot can finish them."""
+    if not tracking:
+        return 0
+    marked = 0
+    for row in rows:
+        rid = str(row.get("id") or "")
+        if not rid or rid in skip_ids:
+            continue
+        if (row.get("title_zh") or "").strip():
+            continue
+        # Already tracked as failure/catch-up — leave the existing signal.
+        if is_catch_up_row(row):
+            continue
+        try:
+            sb.table("articles").update({"translate_error": CATCH_UP_MARK}).eq("id", rid).execute()
+            marked += 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"  warn: could not mark catch-up for {rid}: {exc}", file=sys.stderr)
+    return marked
+
+
 def translate_one(article: dict[str, Any]) -> dict[str, str] | None:
     # Rewrite from the extracted body when the crawl captured one: an RSS summary is a
     # single truncated sentence, so summaries written from it read as padded restatements.
@@ -397,7 +493,7 @@ def translate_one(article: dict[str, Any]) -> dict[str, str] | None:
             ensure_ascii=False,
         )
     )
-    # body_zh is 2–4 paragraphs; 600 tokens often truncates JSON mid-object.
+    # Ceiling only — actual usage follows output length; avoids truncated JSON retries.
     data = chat_json(TRANSLATE_SYSTEM, user, temperature=0.25, max_tokens=2200)
     title_zh = str(data.get("title_zh") or "").strip()[:120]
     lead_zh = str(data.get("lead_zh") or "").strip()[:300]
@@ -419,11 +515,16 @@ def translate_one(article: dict[str, Any]) -> dict[str, str] | None:
     }
 
 
-def translate_articles(limit: int = 80, force: bool = False) -> int:
+def translate_articles(
+    limit: int = TRANSLATE_LIMIT,
+    catch_up_max: int = CATCH_UP_MAX,
+    force: bool = False,
+) -> int:
     sb = get_supabase()
     with_body = _has_body_column(sb)
+    tracking = _has_translate_tracking(sb)
     # Widest select first; fall back when a migration has not been applied yet.
-    selects = _select_article_columns(with_body)
+    selects = _select_article_columns(with_body, tracking)
     columns = None
     for cols in selects:
         try:
@@ -436,46 +537,67 @@ def translate_articles(limit: int = 80, force: bool = False) -> int:
         print("Could not select articles columns for translate", file=sys.stderr)
         return 0
 
-    hit_ids_list = _recent_hit_article_ids(sb, limit=max(400, limit * 5))
+    # Modest hit scan — enough to find deferred rows without pulling the whole table.
+    hit_ids_list = _recent_hit_article_ids(sb, limit=max(120, limit * 3))
     hit_id_set = set(hit_ids_list)
-    candidates: list[dict[str, Any]] = []
-
-    # 1) Drain keyword-hit backlog first (including older stuck rows outside any recency window).
+    hit_rows: list[dict[str, Any]] = []
     if hit_ids_list:
-        hit_rows = _fetch_articles_by_ids(sb, columns, hit_ids_list)
-        # Preserve hit recency order from article_hits.
-        by_id = {str(r.get("id") or ""): r for r in hit_rows}
-        candidates.extend(by_id[i] for i in hit_ids_list if i in by_id)
+        fetched = _fetch_articles_by_ids(sb, columns, hit_ids_list)
+        by_id = {str(r.get("id") or ""): r for r in fetched}
+        hit_rows = [by_id[i] for i in hit_ids_list if i in by_id]
 
-    # 2) Fill remaining slots from any pending articles (guest preview etc.).
-    if force:
+    pending_hits = [
+        r for r in hit_rows if force or article_needs_zh(r, with_body=with_body)
+    ]
+    # Fresh = newest pending hits (and only if room remains, newest empty-title previews).
+    fresh_hits = sorted(
+        pending_hits,
+        key=lambda r: str(r.get("published_at") or ""),
+        reverse=True,
+    )
+    fresh_rows = list(fresh_hits)
+    if force or len(fresh_rows) < limit:
         try:
-            result = (
+            q = (
                 sb.table("articles")
                 .select(columns)
                 .order("published_at", desc=True)
-                .limit(max(limit * 3, 120))
-                .execute()
+                .limit(limit)
             )
-            candidates.extend(result.data or [])
+            if not force:
+                q = q.eq("title_zh", "")
+            extra = q.execute().data or []
+            fresh_rows.extend(extra)
         except Exception as exc:  # noqa: BLE001
-            print(f"  warn: force retranslate scan failed: {exc}", file=sys.stderr)
-    else:
-        candidates.extend(
-            _fetch_pending_articles(sb, columns, with_body=with_body, limit=max(limit * 3, 120))
-        )
+            print(f"  warn: fresh pending scan failed: {exc}", file=sys.stderr)
+
+    catch_up_rows = _fetch_catch_up_articles(
+        sb, columns, tracking=tracking, limit=max(catch_up_max * 3, 24)
+    )
+    # Also treat older pending hits (beyond what fresh budget can cover) as catch-up sources.
+    if len(fresh_hits) > (limit - min(catch_up_max, limit)):
+        overflow = fresh_hits[limit - min(catch_up_max, limit) :]
+        catch_up_rows = overflow + catch_up_rows
 
     rows = pick_translate_batch(
-        candidates,
-        hit_id_set,
+        fresh_rows,
+        catch_up_rows,
         limit=limit,
+        catch_up_max=catch_up_max,
         with_body=with_body,
         force=force,
     )
-    hit_n = sum(1 for r in rows if str(r.get("id") or "") in hit_id_set)
+    selected_ids = {str(r.get("id") or "") for r in rows}
+    marked = _mark_catch_up(
+        sb,
+        pending_hits,
+        tracking=tracking,
+        skip_ids=selected_ids,
+    )
     print(
         f"Articles pending Chinese rewrite: {len(rows)} "
-        f"(force={force}, body_col={with_body}, hits_in_batch={hit_n})"
+        f"(force={force}, body_col={with_body}, tracking={tracking}, "
+        f"catch_up_slots~{min(catch_up_max, limit)}, catch_up_marked={marked})"
     )
     if not rows:
         mark_jobs(
@@ -496,14 +618,19 @@ def translate_articles(limit: int = 80, force: bool = False) -> int:
     )
 
     done = 0
+    failed = 0
     items: list[dict[str, str]] = []
     for idx, row in enumerate(rows, start=1):
         try:
             out = translate_one(row)
             if not out:
+                failed += 1
                 print(f"  skip empty result for {row.get('id')}")
+                _record_translate_failure(
+                    sb, row, tracking=tracking, reason="empty_model_result"
+                )
                 continue
-            payload: dict[str, str] = {
+            payload: dict[str, str | int] = {
                 "title_zh": out["title_zh"],
                 "summary_zh": out["summary_zh"],
             }
@@ -514,6 +641,9 @@ def translate_articles(limit: int = 80, force: bool = False) -> int:
                 payload["summary_zh"] = "\n\n".join(
                     x for x in [out["lead_zh"], out["body_zh"]] if x
                 )[:4000]
+            if tracking:
+                payload["translate_attempts"] = 0
+                payload["translate_error"] = ""
             sb.table("articles").update(payload).eq("id", row["id"]).execute()
             done += 1
             items.append(
@@ -525,15 +655,22 @@ def translate_articles(limit: int = 80, force: bool = False) -> int:
             )
             print(f"  [{idx}/{len(rows)}] {out['title_zh']}")
         except Exception as exc:  # noqa: BLE001
+            failed += 1
             print(f"  FAILED {row.get('id')}: {exc}", file=sys.stderr)
+            _record_translate_failure(sb, row, tracking=tracking, reason=str(exc))
 
     mark_jobs(
         sb,
         step="translate",
         status="done" if done else "error",
-        detail=f"翻译完成 {done}/{len(rows)}",
+        detail=f"翻译完成 {done}/{len(rows)}" + (f" · 失败 {failed}" if failed else ""),
         meta={
-            "counts": {"done": done, "total": len(rows)},
+            "counts": {
+                "done": done,
+                "total": len(rows),
+                "failed": failed,
+                "catch_up_marked": marked,
+            },
             "items": items[:20],
         },
         from_statuses=["queued", "running"],
