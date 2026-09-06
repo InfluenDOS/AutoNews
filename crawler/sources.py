@@ -45,6 +45,20 @@ FEED_SOURCES: list[FeedSource] = [*NEWS_SOURCES, *PREVIEW_SOURCES]
 NEWS_SOURCE_NAMES = {s.name for s in NEWS_SOURCES}
 PREVIEW_SOURCE_NAMES = {s.name for s in PREVIEW_SOURCES}
 
+_extra_news_names: set[str] = set()
+
+
+def register_news_names(names: set[str] | list[str]) -> None:
+    """Allow custom user feeds to pass the news-source gate for this process."""
+    _extra_news_names.update(n for n in names if n)
+
+
+def clear_registered_news_names() -> None:
+    _extra_news_names.clear()
+
 
 def is_news_source(name: str | None) -> bool:
-    return (name or "") in NEWS_SOURCE_NAMES
+    n = name or ""
+    if n in PREVIEW_SOURCE_NAMES:
+        return False
+    return n in NEWS_SOURCE_NAMES or n in _extra_news_names

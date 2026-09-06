@@ -32,3 +32,23 @@ export type Star = {
   article_id: string
   created_at: string
 }
+
+export type SourceFeed = {
+  name: string
+  url: string
+  country?: string
+}
+
+export type SourceBundle = {
+  id: string
+  user_id: string
+  label: string
+  kind: 'preset' | 'rss' | 'fuzzy'
+  preset_key: string | null
+  rss_url: string | null
+  enabled: boolean
+  status: 'pending' | 'ready' | 'error'
+  resolved_feeds: SourceFeed[]
+  error_text: string
+  created_at: string
+}

@@ -239,7 +239,7 @@ async function maybeTriggerCrawl(
     return { triggered: false, reason: 'missing_github_token' }
   }
 
-  const cooldownSec = Number(Deno.env.get('CRAWL_COOLDOWN_SEC') || '90')
+  const cooldownSec = Number(Deno.env.get('CRAWL_COOLDOWN_SEC') || '300')
   const { data: cool } = await admin
     .from('crawl_dispatch_cooldown')
     .select('last_triggered_at')
@@ -283,6 +283,14 @@ async function maybeTriggerCrawl(
     last_triggered_at: new Date().toISOString(),
     last_by: userId,
   })
+  try {
+    await admin.from('user_crawl_cooldown').upsert({
+      user_id: userId,
+      last_triggered_at: new Date().toISOString(),
+    })
+  } catch {
+    /* table may not exist yet */
+  }
 
   await updateJob(admin, crawlJobId, {
     status: 'running',

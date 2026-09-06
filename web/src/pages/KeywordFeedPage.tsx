@@ -4,8 +4,11 @@ import { ArticleCard } from '../components/ArticleCard'
 import { useAuth } from '../context/AuthContext'
 import { useJobs } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
+import { useSources } from '../context/SourcesContext'
+import { formatCountdown, useCrawlTrigger } from '../hooks/useCrawlTrigger'
 import { articleMatchesKeyword } from '../lib/normalize'
 import { isNewsSource } from '../lib/sources'
+import { groupDuplicateStories } from '../lib/storyDedup'
 import { ARTICLE_LIST_COLUMNS, isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Article, Keyword } from '../types'
 
@@ -126,7 +129,9 @@ export function KeywordFeedPage({ all = false }: Props) {
   const { keywordId } = useParams()
   const { user } = useAuth()
   const { keywords, loading: kwLoading, refresh } = useKeywords()
-  const { jobs, hasActive } = useJobs()
+  const { extraNewsNames } = useSources()
+  const { jobs, hasActive, refreshJobs } = useJobs()
+  const crawl = useCrawlTrigger()
   const [articles, setArticles] = useState<Article[]>([])
   const [hitMatchedAt, setHitMatchedAt] = useState<Map<string, number>>(new Map())
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set())
@@ -203,7 +208,7 @@ export function KeywordFeedPage({ all = false }: Props) {
 
         for (const row of rows) {
           const a = unwrapArticle(row.articles)
-          if (!a || seen.has(a.id) || !isNewsSource(a.source)) continue
+          if (!a || seen.has(a.id) || !isNewsSource(a.source, extraNewsNames)) continue
           seen.add(a.id)
           list.push(a)
           relMap.set(`${kid}:${a.id}`, true)
@@ -225,7 +230,7 @@ export function KeywordFeedPage({ all = false }: Props) {
           const hitTimes = new Map<string, number>()
           for (const hit of (hitRows as HitRow[]) ?? []) {
             const a = unwrapArticle(hit.articles)
-            if (!a || seen.has(a.id) || !isNewsSource(a.source)) continue
+            if (!a || seen.has(a.id) || !isNewsSource(a.source, extraNewsNames)) continue
             pageArticles.push(a)
             const t = Date.parse(hit.created_at || '') || 0
             if (t > 0) hitTimes.set(a.id, t)
@@ -279,7 +284,7 @@ export function KeywordFeedPage({ all = false }: Props) {
         const pageArticles: Article[] = []
         for (const hit of rows) {
           const a = unwrapArticle(hit.articles)
-          if (!a || seen.has(a.id) || !isNewsSource(a.source)) continue
+          if (!a || seen.has(a.id) || !isNewsSource(a.source, extraNewsNames)) continue
           seen.add(a.id)
           pageArticles.push(a)
           const t = Date.parse(hit.created_at || '') || 0
@@ -313,7 +318,7 @@ export function KeywordFeedPage({ all = false }: Props) {
       })
       return { list, matchedAt, relMap, exhausted, nextOffset: offset }
     },
-    [user],
+    [user, extraNewsNames],
   )
 
   const load = useCallback(
@@ -436,6 +441,8 @@ export function KeywordFeedPage({ all = false }: Props) {
     return map
   }, [articles, readyKeywords, relevance])
 
+  const storyGroups = useMemo(() => groupDuplicateStories(articles), [articles])
+
   const lastUpdatedLabel = useMemo(() => {
     let latest = 0
     for (const job of jobs) {
@@ -504,13 +511,35 @@ export function KeywordFeedPage({ all = false }: Props) {
           <p className="eyebrow">{all ? 'All Keywords' : 'Keyword Feed'}</p>
           <h1>{title}</h1>
           <p className="hero-lead">{keywordsBooting ? '加载关键词中…' : lead}</p>
-          <p className="hero-updated">
-            {loading || keywordsBooting
-              ? '更新时间加载中…'
-              : lastUpdatedLabel
-                ? `上次抓取结果 ${lastUpdatedLabel}`
-                : '暂无抓取结果'}
-          </p>
+          <div className="hero-footer">
+            <p className="hero-updated">
+              {loading || keywordsBooting
+                ? '更新时间加载中…'
+                : lastUpdatedLabel
+                  ? `上次抓取结果 ${lastUpdatedLabel}`
+                  : '暂无抓取结果'}
+            </p>
+            <div className="hero-cta">
+              {crawl.cooling && (
+                <span className="hero-cooldown" aria-live="polite">
+                  {formatCountdown(crawl.remaining)}
+                </span>
+              )}
+              <button
+                type="button"
+                className="btn btn-solid btn-crawl"
+                disabled={crawl.busy || crawl.cooling}
+                onClick={() => {
+                  void crawl.trigger(all ? null : keyword?.id).then((result) => {
+                    if (result.triggered) void refreshJobs()
+                  })
+                }}
+              >
+                {crawl.busy ? '触发中…' : '手动抓取'}
+              </button>
+            </div>
+          </div>
+          {crawl.error && <p className="hero-crawl-error">{crawl.error}</p>}
         </div>
         <div className="hero-window" aria-hidden="true" />
       </section>
@@ -524,8 +553,8 @@ export function KeywordFeedPage({ all = false }: Props) {
               : aiPending && !showFeed
                 ? '处理中'
                 : hasMore
-                  ? `已显示 ${articles.length} 条`
-                  : `${articles.length} 条`}
+                  ? `已显示 ${storyGroups.length} 条`
+                  : `${storyGroups.length} 条`}
           </span>
         </div>
 
@@ -550,12 +579,13 @@ export function KeywordFeedPage({ all = false }: Props) {
           ) : (
             <>
               <div className="story-list">
-                {articles.map((article) => (
+                {storyGroups.map(({ article, alts }) => (
                   <ArticleCard
                     key={article.id}
                     article={article}
                     starred={starredIds.has(article.id)}
                     matchedKeywords={matchedKeywordsById.get(article.id)}
+                    altSources={alts.map((a) => ({ source: a.source, url: a.url }))}
                     canStar
                     onToggleStar={() => void toggleStar(article.id)}
                   />

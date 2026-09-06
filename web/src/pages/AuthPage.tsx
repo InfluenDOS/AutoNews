@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { IconEye, IconEyeOff } from '../components/NavIcons'
 
 function translateAuthError(message: string): string {
   const m = message.toLowerCase()
@@ -33,6 +34,7 @@ export function AuthPage() {
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const [enterKey, setEnterKey] = useState(0)
 
   if (!loading && user) {
@@ -91,14 +93,25 @@ export function AuthPage() {
           </label>
           <label>
             密码
-            <input
-              type="password"
-              autoComplete={isSignIn ? 'current-password' : 'new-password'}
-              required
-              minLength={6}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            <div className="password-field">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                autoComplete={isSignIn ? 'current-password' : 'new-password'}
+                required
+                minLength={6}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                className="password-toggle"
+                aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                aria-pressed={showPassword}
+                onClick={() => setShowPassword((v) => !v)}
+              >
+                {showPassword ? <IconEyeOff /> : <IconEye />}
+              </button>
+            </div>
           </label>
           {error && <p className="error">{error}</p>}
           {message && <p className="ok">{message}</p>}

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import type { Article } from '../types'
 
@@ -17,16 +18,26 @@ type Props = {
   article: Article
   starred: boolean
   matchedKeywords?: string[]
+  altSources?: { source: string; url: string }[]
   onToggleStar?: () => void
   canStar: boolean
 }
 
-export function ArticleCard({ article, starred, matchedKeywords, onToggleStar, canStar }: Props) {
+export function ArticleCard({
+  article,
+  starred,
+  matchedKeywords,
+  altSources,
+  onToggleStar,
+  canStar,
+}: Props) {
   const navigate = useNavigate()
+  const [altsOpen, setAltsOpen] = useState(false)
   const title = (article.title_zh || '').trim() || article.title
   const summary = (article.summary_zh || '').trim() || article.summary
   const preview = summary.length > 110 ? `${summary.slice(0, 110).trim()}…` : summary
   const translated = Boolean((article.title_zh || '').trim())
+  const alts = altSources ?? []
 
   return (
     <article className="story">
@@ -53,6 +64,15 @@ export function ArticleCard({ article, starred, matchedKeywords, onToggleStar, c
           </div>
         )}
         <div className="story-actions-right">
+          {alts.length > 0 && (
+            <button
+              type="button"
+              className="text-link alt-sources-toggle"
+              onClick={() => setAltsOpen((v) => !v)}
+            >
+              另有 {alts.length} 个来源
+            </button>
+          )}
           <Link className="text-link" to={`/article/${article.id}`}>
             阅读
           </Link>
@@ -74,6 +94,17 @@ export function ArticleCard({ article, starred, matchedKeywords, onToggleStar, c
           </button>
         </div>
       </div>
+      {altsOpen && alts.length > 0 && (
+        <ul className="alt-sources">
+          {alts.map((alt) => (
+            <li key={alt.url}>
+              <a href={alt.url} target="_blank" rel="noreferrer">
+                {alt.source}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
     </article>
   )
 }

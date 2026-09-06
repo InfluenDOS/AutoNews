@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
@@ -27,7 +27,9 @@ from extract import fetch_bodies
 from normalize import normalize_for_match, recall_score
 from relevance import filter_matches_with_relevance, retract_stale_feed
 from jobs import ensure_crawl_jobs, ensure_translate_jobs, mark_jobs
-from sources import FEED_SOURCES, PREVIEW_SOURCE_NAMES, is_news_source
+from dedup import drop_near_duplicate_hits
+from sources import PREVIEW_SOURCE_NAMES, is_news_source, register_news_names
+from user_sources import collect_crawl_sources, default_allowed_names, load_source_bundles
 
 
 USER_AGENT = "AutoNewsBot/1.0 (+https://github.com/AutoNews; RSS aggregator)"
@@ -126,11 +128,19 @@ def load_user_keywords(sb: Client) -> dict[str, list[dict[str, Any]]]:
 
 
 def matching_keyword_rows(
-    article: dict[str, Any], user_keywords: dict[str, list[dict[str, Any]]]
+    article: dict[str, Any],
+    user_keywords: dict[str, list[dict[str, Any]]],
+    user_allowed: dict[str, set[str]] | None = None,
 ) -> list[tuple[str, dict[str, Any], int]]:
     """Topic shortlist: (user_id, keyword_row, recall_score). Place-only is not enough."""
+    src = article.get("source") or ""
     out: list[tuple[str, dict[str, Any], int]] = []
     for uid, rows in user_keywords.items():
+        allowed = user_allowed.get(uid) if user_allowed is not None else None
+        if allowed is None:
+            allowed = default_allowed_names()
+        if src not in allowed:
+            continue
         for row in rows:
             score = recall_score(article, row)
             if score > 0:
@@ -168,6 +178,54 @@ def resolve_article_ids(sb: Client, urls: list[str]) -> dict[str, str]:
         for row in rows:
             out[row["url"]] = row["id"]
     return out
+
+
+def load_recent_hit_meta(
+    sb: Client, user_ids: list[str], hours: int = 48
+) -> dict[str, list[dict[str, Any]]]:
+    """Existing recent hits (title/published_at) used to skip near-duplicates."""
+    if not user_ids:
+        return {}
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    rows: list[dict[str, Any]] = []
+    chunk_size = 50
+    for i in range(0, len(user_ids), chunk_size):
+        uids = user_ids[i : i + chunk_size]
+        try:
+            chunk = (
+                sb.table("article_hits")
+                .select("user_id, article_id, created_at")
+                .in_("user_id", uids)
+                .gte("created_at", cutoff)
+                .limit(2000)
+                .execute()
+                .data
+                or []
+            )
+            rows.extend(chunk)
+        except Exception:  # noqa: BLE001
+            continue
+    aids = list({r["article_id"] for r in rows if r.get("article_id")})
+    meta: dict[str, dict[str, Any]] = {}
+    for i in range(0, len(aids), 100):
+        chunk = aids[i : i + 100]
+        arts = (
+            sb.table("articles")
+            .select("id, title, title_zh, published_at")
+            .in_("id", chunk)
+            .execute()
+            .data
+            or []
+        )
+        for a in arts:
+            meta[a["id"]] = a
+    by_user: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        art = meta.get(row.get("article_id") or "")
+        if not art:
+            continue
+        by_user.setdefault(row["user_id"], []).append(art)
+    return by_user
 
 
 def merge_hits(sb: Client, hits: list[dict[str, str]]) -> int:
@@ -232,12 +290,17 @@ def crawl() -> None:
     sb = get_supabase()
     user_keywords = load_user_keywords(sb)
     print(f"Users with keywords: {len(user_keywords)}")
+    crawl_feeds, extra_news_names, user_allowed = collect_crawl_sources(load_source_bundles(sb))
+    register_news_names(extra_news_names)
+    for uid in user_keywords:
+        user_allowed.setdefault(uid, default_allowed_names())
+    print(f"Crawl feeds: {len(crawl_feeds)} (extra news names {len(extra_news_names)})")
     ensure_crawl_jobs(sb, user_keywords)
     mark_jobs(
         sb,
         step="crawl",
         status="running",
-        detail="正在抓取塞尔维亚新闻 RSS，随后由 AI 判定关键词相关性…",
+        detail="正在抓取订阅源 RSS，随后由 AI 判定关键词相关性…",
         from_statuses=["queued", "running"],
     )
 
@@ -249,7 +312,7 @@ def crawl() -> None:
     url_kw_hits: dict[str, list[tuple[str, dict[str, Any], int]]] = {}
 
     # ——— Pass 0: scan news feeds into the keyword pool; preview feeds stay separate ———
-    for source in FEED_SOURCES:
+    for source in crawl_feeds:
         try:
             feed = fetch_feed(source.url)
             entries = feed.entries or []
@@ -287,7 +350,7 @@ def crawl() -> None:
         # ——— Pass 1: topic shortlist on title + summary (cheap) ———
         priority: list[tuple[int, dict[str, Any]]] = []
         for article in pool:
-            hits = matching_keyword_rows(article, user_keywords)
+            hits = matching_keyword_rows(article, user_keywords, user_allowed)
             score = max((s for _, _, s in hits), default=0)
             if score > 0:
                 priority.append((score, article))
@@ -317,7 +380,7 @@ def crawl() -> None:
         # ——— Pass 2: re-shortlist over title + summary + body ———
         rescored: list[tuple[int, dict[str, Any]]] = []
         for article in fetch_list:
-            hits = matching_keyword_rows(article, user_keywords)
+            hits = matching_keyword_rows(article, user_keywords, user_allowed)
             if not hits:
                 continue
             url_kw_hits[article["url"]] = hits
@@ -374,6 +437,23 @@ def crawl() -> None:
 
     # ——— Pass 3: AI decides relevance; keywords never write hits by themselves ———
     hits = filter_matches_with_relevance(sb, matches=stage1_matches)
+    new_meta = {
+        aid: {
+            "title": a.get("title") or "",
+            "title_zh": a.get("title_zh") or "",
+            "published_at": a.get("published_at"),
+        }
+        for a in candidates
+        if (aid := id_by_url.get(a["url"]))
+    }
+    before_dedup = len(hits)
+    hits = drop_near_duplicate_hits(
+        hits,
+        new_meta=new_meta,
+        existing=load_recent_hit_meta(sb, list(user_keywords)),
+    )
+    if before_dedup != len(hits):
+        print(f"Near-duplicate hits skipped: {before_dedup - len(hits)}")
     inserted = merge_hits(sb, hits)
     retracted, dropped_stale = retract_stale_feed(sb, user_keywords)
     # Only prune this-run keyword candidates that never became hits.

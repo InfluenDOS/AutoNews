@@ -3,6 +3,7 @@ import { Layout } from './components/Layout'
 import { AuthProvider } from './context/AuthContext'
 import { JobsProvider } from './context/JobsContext'
 import { KeywordsProvider } from './context/KeywordsContext'
+import { SourcesProvider } from './context/SourcesContext'
 import { ArticleDetailPage } from './pages/ArticleDetailPage'
 import { AuthPage } from './pages/AuthPage'
 import { HomeRedirect } from './pages/HomeRedirect'
@@ -14,21 +15,23 @@ export default function App() {
   return (
     <AuthProvider>
       <KeywordsProvider>
-        <JobsProvider>
-          <HashRouter>
-            <Layout>
-              <Routes>
-                <Route path="/" element={<HomeRedirect />} />
-                <Route path="/k/:keywordId" element={<KeywordFeedPage />} />
-                <Route path="/article/:id" element={<ArticleDetailPage />} />
-                <Route path="/auth" element={<AuthPage />} />
-                <Route path="/keywords" element={<KeywordsPage />} />
-                <Route path="/stars" element={<StarsPage />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </Layout>
-          </HashRouter>
-        </JobsProvider>
+        <SourcesProvider>
+          <JobsProvider>
+            <HashRouter>
+              <Layout>
+                <Routes>
+                  <Route path="/" element={<HomeRedirect />} />
+                  <Route path="/k/:keywordId" element={<KeywordFeedPage />} />
+                  <Route path="/article/:id" element={<ArticleDetailPage />} />
+                  <Route path="/auth" element={<AuthPage />} />
+                  <Route path="/keywords" element={<KeywordsPage />} />
+                  <Route path="/stars" element={<StarsPage />} />
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </Layout>
+            </HashRouter>
+          </JobsProvider>
+        </SourcesProvider>
       </KeywordsProvider>
     </AuthProvider>
   )

@@ -89,6 +89,39 @@ export function IconChevron({ className }: IconProps) {
   )
 }
 
+/** 抓取源 */
+export function IconRss({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="M4 11a9 9 0 0 1 9 9" />
+      <path d="M4 4a16 16 0 0 1 16 16" />
+      <circle cx="5" cy="19" r="1.2" fill="currentColor" stroke="none" />
+    </Svg>
+  )
+}
+
+/** 显示密码 */
+export function IconEye({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="2.6" />
+    </Svg>
+  )
+}
+
+/** 隐藏密码 */
+export function IconEyeOff({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="M3 3l18 18" />
+      <path d="M10.6 10.6A2.6 2.6 0 0 0 13.4 13.4" />
+      <path d="M6.5 6.7C4.2 8.2 2.8 10.3 2 12c1.2 2.6 4.7 7 10 7 1.8 0 3.4-.5 4.8-1.2" />
+      <path d="M9.7 5.2C10.4 5.1 11.2 5 12 5c5.3 0 8.8 4.4 10 7-.5 1.1-1.3 2.3-2.4 3.4" />
+    </Svg>
+  )
+}
+
 /** 删除 */
 export function IconTrash({ className }: IconProps) {
   return (
