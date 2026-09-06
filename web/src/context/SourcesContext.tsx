@@ -11,7 +11,7 @@ import { useAuth } from './AuthContext'
 import {
   isSerbiaMainstreamPhrase,
   looksLikeFeedUrl,
-  NEWS_SOURCE_NAMES,
+  SERBIA_MAINSTREAM_FEEDS,
   SERBIA_MAINSTREAM_KEY,
   SERBIA_MAINSTREAM_LABEL,
 } from '../lib/sources'
@@ -35,7 +35,7 @@ type SourcesContextValue = {
   defaultEnabled: boolean
   loading: boolean
   refresh: (opts?: { quiet?: boolean }) => Promise<void>
-  addSource: (input: string) => Promise<{ error?: string }>
+  addSource: (input: string) => Promise<{ id?: string; error?: string }>
   deleteSource: (id: string) => Promise<{ error?: string }>
 }
 
@@ -119,7 +119,7 @@ export function SourcesProvider({ children }: { children: ReactNode }) {
         kind: 'preset',
         status: 'ready',
         virtual: !presetRow,
-        feeds: [...NEWS_SOURCE_NAMES].map((name) => ({ name, url: '' })),
+        feeds: SERBIA_MAINSTREAM_FEEDS.map((f) => ({ ...f })),
       })
     }
     for (const b of bundles) {
@@ -161,20 +161,24 @@ export function SourcesProvider({ children }: { children: ReactNode }) {
             .eq('id', presetRow.id)
           if (error) return { error: error.message }
           await refresh()
-          return {}
+          return { id: presetRow.id }
         }
-        const { error } = await supabase.from('user_source_bundles').insert({
-          user_id: user.id,
-          label: SERBIA_MAINSTREAM_LABEL,
-          kind: 'preset',
-          preset_key: SERBIA_MAINSTREAM_KEY,
-          enabled: true,
-          status: 'ready',
-          resolved_feeds: [],
-        })
+        const { data, error } = await supabase
+          .from('user_source_bundles')
+          .insert({
+            user_id: user.id,
+            label: SERBIA_MAINSTREAM_LABEL,
+            kind: 'preset',
+            preset_key: SERBIA_MAINSTREAM_KEY,
+            enabled: true,
+            status: 'ready',
+            resolved_feeds: [],
+          })
+          .select('id')
+          .maybeSingle()
         if (error) return { error: error.message }
         await refresh()
-        return {}
+        return { id: (data?.id as string | undefined) || 'default' }
       }
 
       const asUrl = looksLikeFeedUrl(trimmed)
@@ -213,7 +217,7 @@ export function SourcesProvider({ children }: { children: ReactNode }) {
         if (fnErr) console.warn('expand-source failed', fnErr)
       }
       await refresh()
-      return {}
+      return { id }
     },
     [user, defaultEnabled, presetRow, refresh],
   )

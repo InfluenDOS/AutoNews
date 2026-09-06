@@ -1,15 +1,17 @@
 /** News outlets used for keyword feeds. Keep in sync with crawler/sources.py NEWS_SOURCES. */
 
-export const NEWS_SOURCE_NAMES = new Set([
-  'Blic',
-  'Blic Politika',
-  'B92',
-  'RTS',
-  'Novosti',
-  'N1 Serbia',
-  'Danas',
-  'Balkan Insight',
-])
+export const SERBIA_MAINSTREAM_FEEDS: { name: string; url: string; country: string }[] = [
+  { name: 'Blic', url: 'https://www.blic.rs/rss/vesti', country: 'RS' },
+  { name: 'Blic Politika', url: 'https://www.blic.rs/rss/vesti/politika', country: 'RS' },
+  { name: 'B92', url: 'https://www.b92.net/info/rss/vesti.xml', country: 'RS' },
+  { name: 'RTS', url: 'https://www.rts.rs/page/stories/ci/rss.html', country: 'RS' },
+  { name: 'Novosti', url: 'https://www.novosti.rs/rss/vesti', country: 'RS' },
+  { name: 'N1 Serbia', url: 'https://n1info.rs/feed/', country: 'RS' },
+  { name: 'Danas', url: 'https://www.danas.rs/feed/', country: 'RS' },
+  { name: 'Balkan Insight', url: 'https://balkaninsight.com/feed/', country: 'REG' },
+]
+
+export const NEWS_SOURCE_NAMES = new Set(SERBIA_MAINSTREAM_FEEDS.map((f) => f.name))
 
 /** Guest movie/culture pool only. Keep in sync with crawler/sources.py PREVIEW_SOURCES. */
 export const PREVIEW_SOURCE_NAMES = new Set([

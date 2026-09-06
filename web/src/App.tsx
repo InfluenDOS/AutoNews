@@ -9,6 +9,7 @@ import { AuthPage } from './pages/AuthPage'
 import { HomeRedirect } from './pages/HomeRedirect'
 import { KeywordFeedPage } from './pages/KeywordFeedPage'
 import { KeywordsPage } from './pages/KeywordsPage'
+import { SourceDetailPage } from './pages/SourceDetailPage'
 import { StarsPage } from './pages/StarsPage'
 
 export default function App() {
@@ -26,6 +27,8 @@ export default function App() {
                   <Route path="/auth" element={<AuthPage />} />
                   <Route path="/keywords" element={<KeywordsPage />} />
                   <Route path="/stars" element={<StarsPage />} />
+                  <Route path="/sources" element={<SourceDetailPage all />} />
+                  <Route path="/s/:sourceId" element={<SourceDetailPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Layout>

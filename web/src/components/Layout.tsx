@@ -248,12 +248,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
     setSrcDraft('')
     setSrcAdding(false)
     void refreshJobs()
+    if (result.id) navigate(`/s/${result.id}`)
+    else navigate('/sources')
   }
 
   async function onDeleteSource(id: string, label: string) {
     if (!window.confirm(`确定删除抓取源「${label}」？\n已抓到的新闻会保留。`)) return
     const result = await deleteSource(id)
-    if (result.error) window.alert(result.error)
+    if (result.error) {
+      window.alert(result.error)
+      return
+    }
+    if (location.pathname === `/s/${id}`) navigate('/sources')
   }
 
   return (
@@ -419,12 +425,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
             {user && (
               <div className={`side-group${srcOpen ? '' : ' is-folded'}`}>
                 <div className="side-item-row">
-                  <span className="side-item side-item-grow" title="抓取源">
+                  <NavLink to="/sources" className="side-item side-item-grow" title="抓取源" end>
                     <span className="nav-icon" aria-hidden>
                       <IconRss />
                     </span>
                     <span className="nav-label">抓取源</span>
-                  </span>
+                  </NavLink>
                   <button
                     type="button"
                     className="side-fold"
@@ -449,7 +455,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   <div className="side-children">
                     {sourceItems.map((s) => (
                       <div key={s.id} className="side-kw-row">
-                        <span
+                        <NavLink
+                          to={`/s/${s.id}`}
                           className="side-item side-item-child side-item-grow"
                           title={s.errorText || s.label}
                           tabIndex={srcOpen ? undefined : -1}
@@ -466,7 +473,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                               !
                             </span>
                           )}
-                        </span>
+                        </NavLink>
                         <button
                           type="button"
                           className="side-kw-delete"
