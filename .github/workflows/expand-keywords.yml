@@ -3,7 +3,9 @@ name: Expand pending keywords
 # Lightweight: AI expand only (no RSS crawl). Backup if Edge Function fails.
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # Keep the 10-minute cadence away from the top of the hour and the
+    # hourly crawl at minute 23.
+    - cron: "8-58/10 * * * *"
   workflow_dispatch:
 
 jobs:

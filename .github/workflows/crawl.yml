@@ -2,8 +2,9 @@ name: Crawl keyword news RSS
 
 on:
   schedule:
-    # Fixed hourly crawl (independent of on-demand runs from Edge Function)
-    - cron: "0 * * * *"
+    # Avoid GitHub Actions' high-load period at the top of each hour.
+    # Fixed hourly crawl (independent of on-demand runs from Edge Function).
+    - cron: "23 * * * *"
   workflow_dispatch:
 
 concurrency:
