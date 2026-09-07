@@ -60,14 +60,12 @@ async function cooldownRemaining(
   admin: ReturnType<typeof createClient>,
   userId: string,
 ): Promise<number> {
-  const globalSec = Number(Deno.env.get('CRAWL_COOLDOWN_SEC') || '300')
-  const [{ data: userCool }, { data: globalCool }] = await Promise.all([
-    admin.from('user_crawl_cooldown').select('last_triggered_at').eq('user_id', userId).maybeSingle(),
-    admin.from('crawl_dispatch_cooldown').select('last_triggered_at').eq('id', 1).maybeSingle(),
-  ])
-  const userLeft = remainingFrom(userCool?.last_triggered_at, USER_COOLDOWN_SEC)
-  const globalLeft = remainingFrom(globalCool?.last_triggered_at, globalSec)
-  return Math.max(userLeft, globalLeft)
+  const { data: userCool } = await admin
+    .from('user_crawl_cooldown')
+    .select('last_triggered_at')
+    .eq('user_id', userId)
+    .maybeSingle()
+  return remainingFrom(userCool?.last_triggered_at, USER_COOLDOWN_SEC)
 }
 
 async function markUserCooldown(admin: ReturnType<typeof createClient>, userId: string): Promise<void> {
@@ -191,11 +189,6 @@ Deno.serve(async (req) => {
       )
     }
 
-    await admin.from('crawl_dispatch_cooldown').upsert({
-      id: 1,
-      last_triggered_at: new Date().toISOString(),
-      last_by: user.id,
-    })
     await markUserCooldown(admin, user.id)
 
     await updateJob(admin, crawlJobId, {

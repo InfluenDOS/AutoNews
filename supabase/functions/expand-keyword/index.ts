@@ -239,24 +239,6 @@ async function maybeTriggerCrawl(
     return { triggered: false, reason: 'missing_github_token' }
   }
 
-  const cooldownSec = Number(Deno.env.get('CRAWL_COOLDOWN_SEC') || '300')
-  const { data: cool } = await admin
-    .from('crawl_dispatch_cooldown')
-    .select('last_triggered_at')
-    .eq('id', 1)
-    .maybeSingle()
-
-  if (cool?.last_triggered_at) {
-    const elapsed = Date.now() - new Date(cool.last_triggered_at).getTime()
-    if (elapsed < cooldownSec * 1000) {
-      await updateJob(admin, crawlJobId, {
-        status: 'done',
-        detail: `${label} 已并入近期抓取任务`,
-      })
-      return { triggered: false, reason: 'cooldown' }
-    }
-  }
-
   const url = `https://api.github.com/repos/${repo}/actions/workflows/${workflow}/dispatches`
   const resp = await fetch(url, {
     method: 'POST',
@@ -278,11 +260,6 @@ async function maybeTriggerCrawl(
     return { triggered: false, reason: `github_${resp.status}:${text.slice(0, 120)}` }
   }
 
-  await admin.from('crawl_dispatch_cooldown').upsert({
-    id: 1,
-    last_triggered_at: new Date().toISOString(),
-    last_by: userId,
-  })
   try {
     await admin.from('user_crawl_cooldown').upsert({
       user_id: userId,
