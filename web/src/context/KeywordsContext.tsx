@@ -8,8 +8,9 @@ import {
   type ReactNode,
 } from 'react'
 import { useAuth } from './AuthContext'
-import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { keywordsSnapshotEqual } from '../lib/listSnapshot'
 import { normalizeForMatch } from '../lib/normalize'
+import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Keyword } from '../types'
 
 type KeywordsContextValue = {
@@ -44,8 +45,12 @@ export function KeywordsProvider({ children }: { children: ReactNode }) {
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: true })
-    if (!error) setKeywords((data as Keyword[]) ?? [])
-    else setKeywords([])
+    if (!error) {
+      const next = (data as Keyword[]) ?? []
+      setKeywords((prev) => (keywordsSnapshotEqual(prev, next) ? prev : next))
+    } else {
+      setKeywords((prev) => (prev.length === 0 ? prev : []))
+    }
     setLoading(false)
   }, [user])
 

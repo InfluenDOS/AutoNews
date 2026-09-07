@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import type { Article } from '../types'
 
@@ -19,11 +19,11 @@ type Props = {
   starred: boolean
   matchedKeywords?: string[]
   altSources?: { source: string; url: string }[]
-  onToggleStar?: () => void
+  onToggleStar?: (articleId: string) => void
   canStar: boolean
 }
 
-export function ArticleCard({
+export const ArticleCard = memo(function ArticleCard({
   article,
   starred,
   matchedKeywords,
@@ -85,7 +85,7 @@ export function ArticleCard({
                 navigate('/auth')
                 return
               }
-              onToggleStar()
+              onToggleStar(article.id)
             }}
             aria-label={!canStar ? '登录后收藏' : starred ? '取消收藏' : '加入收藏'}
             title={!canStar ? '登录后即可收藏' : starred ? '取消收藏' : '加入收藏'}
@@ -107,4 +107,4 @@ export function ArticleCard({
       )}
     </article>
   )
-}
+})

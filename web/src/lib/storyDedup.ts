@@ -1,5 +1,5 @@
-import { normalizeForMatch } from './normalize'
-import type { Article } from '../types'
+import { normalizeForMatch } from './normalize.ts'
+import type { Article } from '../types.ts'
 
 export const STORY_DEDUP_THRESHOLD = 0.65
 const WINDOW_MS = 6 * 60 * 60 * 1000
@@ -17,13 +17,23 @@ function cjkBigrams(text: string): Set<string> {
   return grams
 }
 
+const TOKEN_CACHE_LIMIT = 400
+const tokenCache = new Map<string, Set<string>>()
+
 export function titleTokens(title: string): Set<string> {
+  const cached = tokenCache.get(title)
+  if (cached) return cached
   const norm = normalizeForMatch(title)
-  const parts = norm.split(/\s+/).filter((t) => t.length >= 2)
-  if (parts.length >= 2) return new Set(parts)
-  const blob = parts[0] || [...norm].filter((ch) => !/\s/.test(ch)).join('')
-  if ([...blob].some((ch) => ch >= '\u4e00' && ch <= '\u9fff')) return cjkBigrams(blob)
-  return parts.length ? new Set(parts) : norm ? new Set([norm]) : new Set()
+  const blob = [...norm].filter((ch) => !/\s/.test(ch)).join('')
+  let tokens: Set<string>
+  if ([...blob].some((ch) => ch >= '\u4e00' && ch <= '\u9fff')) tokens = cjkBigrams(blob)
+  else {
+    const parts = norm.split(/\s+/).filter((t) => t.length >= 2)
+    tokens = parts.length ? new Set(parts) : norm ? new Set([norm]) : new Set()
+  }
+  if (tokenCache.size >= TOKEN_CACHE_LIMIT) tokenCache.clear()
+  tokenCache.set(title, tokens)
+  return tokens
 }
 
 export function titleJaccard(a: string, b: string): number {
@@ -90,6 +100,15 @@ function preferCanonical(a: Article, b: Article): number {
   return a.id.localeCompare(b.id)
 }
 
+function sortGroups(groups: StoryGroup[]): StoryGroup[] {
+  groups.sort((g1, g2) => {
+    const ta = publishedMs(g1.article.published_at)
+    const tb = publishedMs(g2.article.published_at)
+    return tb - ta
+  })
+  return groups
+}
+
 export function groupDuplicateStories(articles: Article[]): StoryGroup[] {
   const used = new Set<string>()
   const groups: StoryGroup[] = []
@@ -108,10 +127,50 @@ export function groupDuplicateStories(articles: Article[]): StoryGroup[] {
     groups.push({ article: members[0], alts: members.slice(1) })
   }
 
-  groups.sort((g1, g2) => {
-    const ta = publishedMs(g1.article.published_at)
-    const tb = publishedMs(g2.article.published_at)
-    return tb - ta
-  })
-  return groups
+  return sortGroups(groups)
+}
+
+export type StoryPair = { lo: string; hi: string }
+
+export function groupStoriesWithPairs(articles: Article[], pairs: StoryPair[]): StoryGroup[] {
+  if (articles.length === 0) return []
+  const parent = new Map<string, string>()
+  const find = (id: string): string => {
+    const p = parent.get(id) ?? id
+    if (p === id) return id
+    const root = find(p)
+    parent.set(id, root)
+    return root
+  }
+  const union = (a: string, b: string) => {
+    const pa = find(a)
+    const pb = find(b)
+    if (pa !== pb) parent.set(pa, pb)
+  }
+
+  for (const a of articles) parent.set(a.id, a.id)
+  const known = new Set(articles.map((a) => a.id))
+  for (const { lo, hi } of pairs) {
+    if (known.has(lo) && known.has(hi)) union(lo, hi)
+  }
+
+  const buckets = new Map<string, Article[]>()
+  for (const a of articles) {
+    const root = find(a.id)
+    const list = buckets.get(root) ?? []
+    list.push(a)
+    buckets.set(root, list)
+  }
+
+  const groups: StoryGroup[] = []
+  const leftovers: Article[] = []
+  for (const members of buckets.values()) {
+    if (members.length > 1) {
+      members.sort(preferCanonical)
+      groups.push({ article: members[0], alts: members.slice(1) })
+    } else {
+      leftovers.push(members[0])
+    }
+  }
+  return sortGroups([...groups, ...groupDuplicateStories(leftovers)])
 }

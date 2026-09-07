@@ -9,6 +9,7 @@ from typing import Any
 from ai_client import ai_configured, chat_json
 from crawl import get_supabase
 from jobs import job_title, mark_jobs, phrase_label
+from story_cluster import cluster_stories
 from normalize import (
     clean_exclude_terms,
     clean_match_groups,
@@ -658,6 +659,13 @@ def translate_articles(
             failed += 1
             print(f"  FAILED {row.get('id')}: {exc}", file=sys.stderr)
             _record_translate_failure(sb, row, tracking=tracking, reason=str(exc))
+
+    translated_ids = [str(it.get("id") or "") for it in items if it.get("id")]
+    if translated_ids:
+        try:
+            cluster_stories(sb, translated_ids)
+        except Exception as exc:  # noqa: BLE001
+            print(f"story_cluster after translate failed: {exc}")
 
     mark_jobs(
         sb,

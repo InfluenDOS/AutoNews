@@ -15,6 +15,7 @@ import {
   SERBIA_MAINSTREAM_KEY,
   SERBIA_MAINSTREAM_LABEL,
 } from '../lib/sources'
+import { bundlesSnapshotEqual } from '../lib/listSnapshot'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { SourceBundle, SourceFeed } from '../types'
 
@@ -75,14 +76,13 @@ export function SourcesProvider({ children }: { children: ReactNode }) {
         .order('created_at', { ascending: true })
       if (error) {
         console.warn('user_source_bundles', error.message)
-        setBundles([])
+        setBundles((prev) => (prev.length === 0 ? prev : []))
       } else {
-        setBundles(
-          ((data as SourceBundle[]) ?? []).map((row) => ({
-            ...row,
-            resolved_feeds: parseFeeds(row.resolved_feeds),
-          })),
-        )
+        const next = ((data as SourceBundle[]) ?? []).map((row) => ({
+          ...row,
+          resolved_feeds: parseFeeds(row.resolved_feeds),
+        }))
+        setBundles((prev) => (bundlesSnapshotEqual(prev, next) ? prev : next))
       }
       setLoading(false)
     },

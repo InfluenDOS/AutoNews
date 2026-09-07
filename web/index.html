@@ -15,6 +15,14 @@
       rel="stylesheet"
     />
     <title>AutoNews · 关键词新闻</title>
+    <script>
+      (function () {
+        try {
+          var id = localStorage.getItem('autonews-skin')
+          if (id === 'forest') document.documentElement.dataset.theme = id
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

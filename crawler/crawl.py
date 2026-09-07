@@ -27,8 +27,8 @@ from extract import fetch_bodies
 from normalize import normalize_for_match, recall_score
 from relevance import filter_matches_with_relevance, retract_stale_feed
 from jobs import ensure_crawl_jobs, ensure_translate_jobs, mark_jobs
-from dedup import drop_near_duplicate_hits
 from sources import PREVIEW_SOURCE_NAMES, is_news_source, register_news_names
+from story_cluster import cluster_stories
 from user_sources import collect_crawl_sources, default_allowed_names, load_source_bundles
 
 
@@ -178,54 +178,6 @@ def resolve_article_ids(sb: Client, urls: list[str]) -> dict[str, str]:
         for row in rows:
             out[row["url"]] = row["id"]
     return out
-
-
-def load_recent_hit_meta(
-    sb: Client, user_ids: list[str], hours: int = 48
-) -> dict[str, list[dict[str, Any]]]:
-    """Existing recent hits (title/published_at) used to skip near-duplicates."""
-    if not user_ids:
-        return {}
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    rows: list[dict[str, Any]] = []
-    chunk_size = 50
-    for i in range(0, len(user_ids), chunk_size):
-        uids = user_ids[i : i + chunk_size]
-        try:
-            chunk = (
-                sb.table("article_hits")
-                .select("user_id, article_id, created_at")
-                .in_("user_id", uids)
-                .gte("created_at", cutoff)
-                .limit(2000)
-                .execute()
-                .data
-                or []
-            )
-            rows.extend(chunk)
-        except Exception:  # noqa: BLE001
-            continue
-    aids = list({r["article_id"] for r in rows if r.get("article_id")})
-    meta: dict[str, dict[str, Any]] = {}
-    for i in range(0, len(aids), 100):
-        chunk = aids[i : i + 100]
-        arts = (
-            sb.table("articles")
-            .select("id, title, title_zh, published_at")
-            .in_("id", chunk)
-            .execute()
-            .data
-            or []
-        )
-        for a in arts:
-            meta[a["id"]] = a
-    by_user: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        art = meta.get(row.get("article_id") or "")
-        if not art:
-            continue
-        by_user.setdefault(row["user_id"], []).append(art)
-    return by_user
 
 
 def merge_hits(sb: Client, hits: list[dict[str, str]]) -> int:
@@ -437,24 +389,13 @@ def crawl() -> None:
 
     # ——— Pass 3: AI decides relevance; keywords never write hits by themselves ———
     hits = filter_matches_with_relevance(sb, matches=stage1_matches)
-    new_meta = {
-        aid: {
-            "title": a.get("title") or "",
-            "title_zh": a.get("title_zh") or "",
-            "published_at": a.get("published_at"),
-        }
-        for a in candidates
-        if (aid := id_by_url.get(a["url"]))
-    }
-    before_dedup = len(hits)
-    hits = drop_near_duplicate_hits(
-        hits,
-        new_meta=new_meta,
-        existing=load_recent_hit_meta(sb, list(user_keywords)),
-    )
-    if before_dedup != len(hits):
-        print(f"Near-duplicate hits skipped: {before_dedup - len(hits)}")
     inserted = merge_hits(sb, hits)
+    cluster_ids = list({h["article_id"] for h in hits if h.get("article_id")})
+    if cluster_ids:
+        try:
+            cluster_stories(sb, cluster_ids)
+        except Exception as exc:  # noqa: BLE001
+            print(f"story_cluster after crawl failed: {exc}")
     retracted, dropped_stale = retract_stale_feed(sb, user_keywords)
     # Only prune this-run keyword candidates that never became hits.
     # Matched articles (hits) are permanent user feed content — never wiped on crawl.

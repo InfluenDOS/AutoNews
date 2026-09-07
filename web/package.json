@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test:match": "node --experimental-strip-types scripts/normalize.parity.ts",
+    "test:story": "node --experimental-strip-types scripts/storyDedup.parity.ts",
+    "test": "npm run test:match && npm run test:story",
     "preview": "vite preview"
   },
   "dependencies": {

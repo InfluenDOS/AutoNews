@@ -1,4 +1,5 @@
-:root {
+:root,
+[data-theme="forest"] {
   --ink: #f4f7f2;
   --ink-soft: rgba(244, 247, 242, 0.72);
   --ink-dim: rgba(244, 247, 242, 0.48);
@@ -148,6 +149,34 @@ textarea {
   overflow-y: auto;
   overscroll-behavior: contain;
   transition: padding 0.36s var(--side-ease);
+}
+
+.sidebar-dock {
+  flex-shrink: 0;
+  padding: 0.8rem 1.1rem 1rem;
+  border-top: 1px solid var(--line-soft);
+  transition: padding 0.36s var(--side-ease);
+}
+
+.skin-switch {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.skin-switch:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.app-shell.sidebar-collapsed .sidebar-dock {
+  padding-left: 0.65rem;
+  padding-right: 0.65rem;
+}
+
+.app-shell.sidebar-collapsed .skin-switch {
+  justify-content: center;
+  padding-left: 0.65rem;
+  padding-right: 0.65rem;
 }
 
 .side-brand {
@@ -1038,6 +1067,11 @@ textarea {
   font-size: 0.82rem;
 }
 
+.hero-cta .hero-crawl-error {
+  flex-basis: 100%;
+  text-align: right;
+}
+
 .hero-window {
   position: relative;
   border-radius: var(--radius);
@@ -1240,6 +1274,59 @@ textarea {
 .feed-more-btn:disabled {
   opacity: 0.6;
   cursor: wait;
+}
+
+.feed-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  padding: 1.25rem 0 0.35rem;
+}
+
+.feed-pager-pages {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.feed-pager-btn {
+  min-width: 5.5rem;
+}
+
+.feed-pager-num {
+  min-width: 2.15rem;
+  height: 2.15rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  cursor: pointer;
+}
+
+.feed-pager-num:hover:not(:disabled) {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.feed-pager-num.is-current,
+.feed-pager-num:disabled.is-current {
+  color: var(--ink);
+  border-color: rgba(200, 240, 130, 0.45);
+  background: rgba(200, 240, 130, 0.1);
+  cursor: default;
+}
+
+.feed-pager-gap {
+  color: var(--ink-soft);
+  padding: 0 0.15rem;
 }
 
 .btn-sm {
@@ -1897,6 +1984,13 @@ a.auth-switch {
   }
 
   .app-shell.sidebar-collapsed .sidebar-body {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    padding: 0;
+  }
+
+  .app-shell.sidebar-collapsed .sidebar-dock {
     opacity: 0;
     visibility: hidden;
     pointer-events: none;

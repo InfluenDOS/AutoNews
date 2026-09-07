@@ -70,7 +70,10 @@ kept = drop_near_duplicate_hits(
         ]
     },
 )
-check("skip existing near-duplicate hit", [h["article_id"] for h in kept], ["a3"])
+check("keep near-duplicate hits for alt-source grouping", [h["article_id"] for h in kept], ["a2", "a3"])
+
+SPACED_ZH = "塞尔维亚逮捕一名23岁中国公民 涉嫌向警察行贿"
+check("CJK tokens ignore spaces", len(title_tokens(SPACED_ZH)) > 4, True)
 
 check("zero bundles keep Serbia default", allowed_names_for_user([]), set(NEWS_SOURCE_NAMES))
 check(

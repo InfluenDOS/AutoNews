@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { useJobs } from '../context/JobsContext'
+import { useJobsRefresh } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
 import { useSources } from '../context/SourcesContext'
 import { loadDailyPoem, type DailyPoem } from '../lib/dailyPoem'
 import { ProcessBanner } from './ProcessBanner'
 import { BrandLogo } from './BrandLogo'
+import { SkinSwitcher } from './SkinSwitcher'
 import {
   IconChevron,
   IconHash,
@@ -28,7 +29,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { user, signOut, configured } = useAuth()
   const { keywords, addKeyword, deleteKeyword } = useKeywords()
   const { items: sourceItems, addSource, deleteSource } = useSources()
-  const { refreshJobs } = useJobs()
+  const refreshJobs = useJobsRefresh()
   const navigate = useNavigate()
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(() => {
@@ -586,6 +587,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
               </p>
             </div>
           )}
+        </div>
+
+        <div className="sidebar-dock">
+          <SkinSwitcher />
         </div>
 
         <button

@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useJobs } from '../context/JobsContext'
+import { RECENT_DONE_MS, useJobs } from '../context/JobsContext'
 import { useKeywords } from '../context/KeywordsContext'
 import type { JobMeta, JobMetaItem, UserJob } from '../types/jobs'
 
@@ -57,7 +57,13 @@ function ItemRow({ item, step }: { item: JobMetaItem; step: UserJob['step'] }) {
   return <li>{inner}</li>
 }
 
-function JobRow({ job, phraseHint }: { job: UserJob; phraseHint: string | null }) {
+const JobRow = memo(function JobRow({
+  job,
+  phraseHint,
+}: {
+  job: UserJob
+  phraseHint: string | null
+}) {
   const [open, setOpen] = useState(job.status === 'running' || job.status === 'queued')
   const meta = metaOf(job)
   const items = Array.isArray(meta.items) ? meta.items : []
@@ -146,18 +152,39 @@ function JobRow({ job, phraseHint }: { job: UserJob; phraseHint: string | null }
       )}
     </li>
   )
-}
+})
 
 export function ProcessBanner() {
-  const { activeJobs, recentDone, hasActive } = useJobs()
+  const { jobs, hasActive } = useJobs()
   const { keywords } = useKeywords()
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    const hasRecent = jobs.some((j) => {
+      if (j.status !== 'done' && j.status !== 'error') return false
+      const t = Date.parse(j.updated_at || j.created_at)
+      return Number.isFinite(t) && Date.now() - t < RECENT_DONE_MS
+    })
+    if (!hasRecent) return
+    const id = window.setInterval(() => setNow(Date.now()), 5_000)
+    return () => window.clearInterval(id)
+  }, [jobs])
+
   const phraseById = useMemo(() => {
     const map = new Map<string, string>()
     for (const k of keywords) map.set(k.id, k.phrase)
     return map
   }, [keywords])
 
-  const items = useMemo(() => [...activeJobs, ...recentDone], [activeJobs, recentDone])
+  const items = useMemo(() => {
+    const active = jobs.filter((j) => j.status === 'queued' || j.status === 'running')
+    const recent = jobs.filter((j) => {
+      if (j.status !== 'done' && j.status !== 'error') return false
+      const t = Date.parse(j.updated_at || j.created_at)
+      return Number.isFinite(t) && now - t < RECENT_DONE_MS
+    })
+    return [...active, ...recent]
+  }, [jobs, now])
 
   if (items.length === 0) return null
 

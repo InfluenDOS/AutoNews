@@ -7,30 +7,36 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { useAuth } from './AuthContext'
+import { jobsSnapshotEqual } from '../lib/listSnapshot'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { UserJob } from '../types/jobs'
+import { useAuth } from './AuthContext'
 
-type JobsContextValue = {
-  jobs: UserJob[]
-  activeJobs: UserJob[]
-  recentDone: UserJob[]
-  hasActive: boolean
+type JobsActionsValue = {
   refreshJobs: () => Promise<void>
 }
 
-const JobsContext = createContext<JobsContextValue | null>(null)
+type JobsStatusValue = {
+  hasActive: boolean
+}
 
-const RECENT_DONE_MS = 90_000
+type JobsDataValue = {
+  jobs: UserJob[]
+}
+
+const JobsActionsContext = createContext<JobsActionsValue | null>(null)
+const JobsStatusContext = createContext<JobsStatusValue | null>(null)
+const JobsDataContext = createContext<JobsDataValue | null>(null)
+
+export const RECENT_DONE_MS = 90_000
 
 export function JobsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const [jobs, setJobs] = useState<UserJob[]>([])
-  const [now, setNow] = useState(() => Date.now())
 
   const refreshJobs = useCallback(async () => {
     if (!user || !isSupabaseConfigured) {
-      setJobs([])
+      setJobs((prev) => (prev.length === 0 ? prev : []))
       return
     }
     const { data, error } = await supabase
@@ -42,10 +48,11 @@ export function JobsProvider({ children }: { children: ReactNode }) {
     if (error) {
       // Table may not exist yet before migration
       console.warn('user_jobs', error.message)
-      setJobs([])
+      setJobs((prev) => (prev.length === 0 ? prev : []))
       return
     }
-    setJobs((data as UserJob[]) ?? [])
+    const next = (data as UserJob[]) ?? []
+    setJobs((prev) => (jobsSnapshotEqual(prev, next) ? prev : next))
   }, [user])
 
   useEffect(() => {
@@ -83,36 +90,39 @@ export function JobsProvider({ children }: { children: ReactNode }) {
     if (!hasActive && jobs.every((j) => j.status !== 'done' && j.status !== 'error')) return
     const id = window.setInterval(() => {
       void refreshJobs()
-      setNow(Date.now())
     }, hasActive ? 2500 : 5000)
     return () => window.clearInterval(id)
   }, [hasActive, jobs, refreshJobs])
 
-  const activeJobs = useMemo(
-    () => jobs.filter((j) => j.status === 'queued' || j.status === 'running'),
-    [jobs],
-  )
+  const actions = useMemo(() => ({ refreshJobs }), [refreshJobs])
+  const status = useMemo(() => ({ hasActive }), [hasActive])
+  const data = useMemo(() => ({ jobs }), [jobs])
 
-  const recentDone = useMemo(
-    () =>
-      jobs.filter((j) => {
-        if (j.status !== 'done' && j.status !== 'error') return false
-        const t = Date.parse(j.updated_at || j.created_at)
-        return Number.isFinite(t) && now - t < RECENT_DONE_MS
-      }),
-    [jobs, now],
+  return (
+    <JobsActionsContext.Provider value={actions}>
+      <JobsStatusContext.Provider value={status}>
+        <JobsDataContext.Provider value={data}>{children}</JobsDataContext.Provider>
+      </JobsStatusContext.Provider>
+    </JobsActionsContext.Provider>
   )
+}
 
-  const value = useMemo(
-    () => ({ jobs, activeJobs, recentDone, hasActive, refreshJobs }),
-    [jobs, activeJobs, recentDone, hasActive, refreshJobs],
-  )
+export function useJobsRefresh() {
+  const ctx = useContext(JobsActionsContext)
+  if (!ctx) throw new Error('useJobsRefresh must be used within JobsProvider')
+  return ctx.refreshJobs
+}
 
-  return <JobsContext.Provider value={value}>{children}</JobsContext.Provider>
+export function useJobsStatus() {
+  const ctx = useContext(JobsStatusContext)
+  if (!ctx) throw new Error('useJobsStatus must be used within JobsProvider')
+  return ctx
 }
 
 export function useJobs() {
-  const ctx = useContext(JobsContext)
-  if (!ctx) throw new Error('useJobs must be used within JobsProvider')
-  return ctx
+  const data = useContext(JobsDataContext)
+  const status = useContext(JobsStatusContext)
+  const actions = useContext(JobsActionsContext)
+  if (!data || !status || !actions) throw new Error('useJobs must be used within JobsProvider')
+  return { jobs: data.jobs, hasActive: status.hasActive, refreshJobs: actions.refreshJobs }
 }

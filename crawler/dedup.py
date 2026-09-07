@@ -1,4 +1,4 @@
-"""Near-duplicate story detection for crawl-time hit skipping and tests."""
+"""Near-duplicate story detection used by story clustering and tests."""
 
 from __future__ import annotations
 
@@ -20,12 +20,12 @@ def _cjk_bigrams(text: str) -> set[str]:
 
 def title_tokens(title: str) -> set[str]:
     norm = normalize_for_match(title)
+    blob = "".join(ch for ch in norm if not ch.isspace())
+    if any("\u4e00" <= ch <= "\u9fff" for ch in blob):
+        return _cjk_bigrams(blob)
     parts = [t for t in norm.split() if len(t) >= 2]
     if len(parts) >= 2:
         return set(parts)
-    blob = parts[0] if parts else "".join(ch for ch in norm if not ch.isspace())
-    if any("\u4e00" <= ch <= "\u9fff" for ch in blob):
-        return _cjk_bigrams(blob)
     return set(parts) if parts else ({norm} if norm else set())
 
 
@@ -109,34 +109,9 @@ def drop_near_duplicate_hits(
     new_meta: dict[str, dict[str, Any]],
     existing: dict[str, list[dict[str, Any]]],
 ) -> list[dict[str, str]]:
-    """Skip a new hit when the user already has a same-day similar title.
+    """Keep every hit. Same-story grouping is cached in article_story_pairs.
 
-    Does not mutate existing hits. `existing` maps user_id -> article dicts
-    with title / published_at. `new_meta` maps article_id -> the same fields.
+    `new_meta` / `existing` are unused; kept so older callers still type-check.
     """
-    kept: list[dict[str, str]] = []
-    accepted: dict[str, list[dict[str, Any]]] = {uid: list(rows) for uid, rows in existing.items()}
-
-    for hit in new_hits:
-        uid = hit.get("user_id") or ""
-        aid = hit.get("article_id") or ""
-        meta = new_meta.get(aid) or {}
-        title = str(meta.get("title") or "")
-        published = meta.get("published_at")
-        if not uid or not aid or not title:
-            kept.append(hit)
-            continue
-
-        prior = accepted.setdefault(uid, [])
-        if any(
-            articles_near_duplicate(
-                {"title": title, "title_zh": meta.get("title_zh") or "", "published_at": published},
-                row,
-            )
-            for row in prior
-        ):
-            continue
-
-        kept.append(hit)
-        prior.append({"title": title, "published_at": published, "id": aid})
-    return kept
+    _ = (new_meta, existing)
+    return list(new_hits)

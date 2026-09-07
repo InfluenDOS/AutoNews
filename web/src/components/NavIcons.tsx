@@ -122,6 +122,19 @@ export function IconEyeOff({ className }: IconProps) {
   )
 }
 
+/** 皮肤 */
+export function IconPalette({ className }: IconProps) {
+  return (
+    <Svg className={className}>
+      <path d="M12 3a9 9 0 1 0 0 18 2.4 2.4 0 0 0 2.1-3.6 2.2 2.2 0 0 1 1.9-3.4H17a4 4 0 0 0 0-8h-.3A9 9 0 0 0 12 3Z" />
+      <circle cx="7.8" cy="11" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="10.2" cy="7.6" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="14.2" cy="7.6" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="16.2" cy="11" r="0.9" fill="currentColor" stroke="none" />
+    </Svg>
+  )
+}
+
 /** 删除 */
 export function IconTrash({ className }: IconProps) {
   return (
