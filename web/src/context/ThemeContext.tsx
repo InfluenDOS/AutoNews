@@ -9,7 +9,10 @@ import {
 
 export const SKIN_STORAGE_KEY = 'autonews-skin'
 
-export const SKINS = [{ id: 'forest', label: '森林' }] as const
+export const SKINS = [
+  { id: 'forest', label: '点翠' },
+  { id: 'canhong', label: '残红' },
+] as const
 
 export type SkinId = (typeof SKINS)[number]['id']
 
