@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/configure-supabase-auth.yml
+      - supabase/functions/schedule-dispatch/**
       - supabase/functions/web-signup/**
 
 jobs:
@@ -47,7 +48,7 @@ jobs:
         with:
           version: latest
 
-      - name: Deploy web-signup edge function
+      - name: Deploy edge functions
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           PROJECT_REF: lmhxbkhanptelqltayzj
@@ -60,3 +61,5 @@ jobs:
           supabase functions deploy web-signup \
             --project-ref "${PROJECT_REF}" \
             --no-verify-jwt
+          supabase functions deploy schedule-dispatch \
+            --project-ref "${PROJECT_REF}"
