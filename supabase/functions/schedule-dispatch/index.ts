@@ -1,5 +1,6 @@
 const GITHUB_API_VERSION = '2022-11-28'
 const DEFAULT_REPO = 'InfluenDOS/AutoNews'
+const CRON_SECRET_HEADER = 'x-autonews-cron-secret'
 
 const workflows = {
   crawl: {
@@ -36,9 +37,9 @@ Deno.serve(async (req) => {
     return json({ error: 'method_not_allowed' }, 405)
   }
 
-  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.trim()
-  const authorization = req.headers.get('Authorization')?.trim()
-  if (!serviceRoleKey || authorization !== `Bearer ${serviceRoleKey}`) {
+  const expectedSecret = Deno.env.get('CRON_DISPATCH_SECRET')?.trim()
+  const providedSecret = req.headers.get(CRON_SECRET_HEADER)?.trim()
+  if (!expectedSecret || !providedSecret || providedSecret !== expectedSecret) {
     return json({ error: 'unauthorized' }, 401)
   }
 
