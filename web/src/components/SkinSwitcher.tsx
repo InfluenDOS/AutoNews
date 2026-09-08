@@ -16,7 +16,7 @@ export function SkinSwitcher() {
         <span className="theme-picker-chevron" aria-hidden />
       </summary>
       <div className="theme-picker-options" role="group" aria-label="选择主题">
-        {skins.filter((item) => item.id === 'forest').map((item) => (
+        {skins.filter((item) => item.id === 'forest' || item.id === 'canhong').map((item) => (
           <button
             key={item.id}
             type="button"

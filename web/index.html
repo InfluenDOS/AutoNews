@@ -19,7 +19,7 @@
       (function () {
         try {
           var id = localStorage.getItem('autonews-skin-v2')
-          document.documentElement.dataset.theme = 'jimo'
+          document.documentElement.dataset.theme = id === 'canhong' ? 'canhong' : 'jimo'
         } catch (e) {}
       })()
     </script>

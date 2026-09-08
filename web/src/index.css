@@ -101,12 +101,12 @@
   --danger-rgb: 232, 141, 154;
   --ok: #9ca7c7;
   --page-bg: #17121e;
-  --stage-photo-image: url('/images/diancui-mist.png');
-  --hero-photo-image: url('/images/diancui-mist.png');
-  --hero-photo-position: 66% 45%;
-  --hero-photo-filter: grayscale(0.7) sepia(0.16) hue-rotate(265deg) saturate(0.72) brightness(0.62) contrast(1.06);
-  --stage-photo-filter: grayscale(0.75) sepia(0.18) hue-rotate(265deg) saturate(0.62) brightness(0.56) contrast(1.08);
-  --stage-photo-overlay: linear-gradient(105deg, rgba(24, 15, 31, 0.62), rgba(44, 26, 48, 0.2) 58%, rgba(117, 27, 48, 0.12));
+  --stage-photo-image: url('/images/canhong-winter.png');
+  --hero-photo-image: url('/images/canhong-winter.png');
+  --hero-photo-position: 50% 44%;
+  --hero-photo-filter: saturate(0.68) brightness(0.7) contrast(1.02);
+  --stage-photo-filter: saturate(0.56) brightness(0.48) contrast(1.04);
+  --stage-photo-overlay: linear-gradient(105deg, rgba(24, 15, 31, 0.68), rgba(44, 26, 48, 0.28) 58%, rgba(117, 27, 48, 0.12));
   --stage-shade:
     radial-gradient(ellipse 62% 46% at 82% 18%, rgba(148, 30, 37, 0.16), transparent 58%),
     linear-gradient(180deg, rgba(8, 7, 9, 0.28), rgba(8, 7, 9, 0.62) 62%, rgba(8, 7, 9, 0.86));
@@ -4244,6 +4244,300 @@ a.auth-switch {
   padding-bottom: 1.2rem;
 }
 
+[data-theme="canhong"] .app-shell {
+  grid-template-columns: 300px minmax(0, 1fr);
+  background: #19131f;
+}
+
+[data-theme="canhong"] .app-shell.sidebar-collapsed {
+  grid-template-columns: 76px minmax(0, 1fr);
+}
+
+[data-theme="canhong"] .stage-photo {
+  inset: 0;
+  opacity: 0.2;
+  background-position: center 42%;
+  transform: none;
+  animation: none;
+}
+
+[data-theme="canhong"] .stage-shade {
+  background:
+    radial-gradient(ellipse 54% 34% at 78% 4%, rgba(128, 151, 183, 0.12), transparent 72%),
+    linear-gradient(180deg, rgba(29, 20, 37, 0.28), rgba(17, 12, 23, 0.78));
+}
+
+[data-theme="canhong"] .stage-bg::before {
+  z-index: 1;
+  background: linear-gradient(180deg, rgba(225, 253, 254, 0.035), transparent 20%);
+  mix-blend-mode: normal;
+}
+
+[data-theme="canhong"] .stage-bg::after {
+  z-index: 2;
+  opacity: 1;
+  background: radial-gradient(ellipse at 50% 35%, transparent 20%, rgba(13, 8, 18, 0.36) 100%);
+}
+
+[data-theme="canhong"] .stage-blob {
+  display: none;
+}
+
+[data-theme="canhong"] .sidebar {
+  border-right-color: rgba(165, 158, 190, 0.24);
+  background:
+    linear-gradient(180deg, rgba(73, 39, 63, 0.2), transparent 24%),
+    rgba(25, 18, 31, 0.97);
+  box-shadow: 12px 0 38px rgba(7, 3, 12, 0.3);
+  backdrop-filter: blur(20px);
+}
+
+[data-theme="canhong"] .sidebar::before,
+[data-theme="canhong"] .sidebar::after,
+[data-theme="canhong"] .side-brand::after {
+  display: none;
+}
+
+[data-theme="canhong"] .sidebar-body {
+  gap: 1rem;
+  padding: 1.25rem 1rem 1.1rem;
+}
+
+[data-theme="canhong"] .side-brand {
+  margin: -0.15rem -1rem 0;
+  padding: 0.2rem 1.15rem 1.2rem;
+  border-bottom: 1px solid rgba(165, 158, 190, 0.14);
+}
+
+[data-theme="canhong"] .brand-mark {
+  border: 0;
+  border-radius: 50%;
+  clip-path: none;
+  background: rgba(73, 39, 63, 0.5);
+  color: #c18a9c;
+  box-shadow: 0 0 24px rgba(128, 151, 183, 0.12);
+}
+
+[data-theme="canhong"] .brand-mark-svg {
+  width: 2.25rem;
+  height: 2.25rem;
+  transform: rotate(-5deg);
+}
+
+[data-theme="canhong"] .brand-name {
+  color: #eee7ec;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  letter-spacing: 0.015em;
+  text-transform: none;
+  text-shadow: none;
+}
+
+[data-theme="canhong"] .brand-name small {
+  color: rgba(178, 174, 194, 0.58);
+  font-family: var(--font-body);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+}
+
+[data-theme="canhong"] .side-nav { gap: 0; }
+
+[data-theme="canhong"] .side-group {
+  margin: 0;
+  padding: 0.35rem 0 0.65rem;
+  border-bottom: 1px solid rgba(165, 158, 190, 0.1);
+}
+
+[data-theme="canhong"] .side-primary-section { padding-top: 0.55rem; }
+
+[data-theme="canhong"] .side-nav .side-item,
+[data-theme="canhong"] .side-nav a.side-item,
+[data-theme="canhong"] .side-nav .side-logout,
+[data-theme="canhong"] .side-add-form {
+  border-radius: 7px;
+  color: rgba(224, 218, 228, 0.76);
+}
+
+[data-theme="canhong"] .side-fold,
+[data-theme="canhong"] .side-kw-delete,
+[data-theme="canhong"] .side-add-submit {
+  border-radius: 6px;
+}
+
+[data-theme="canhong"] .nav-icon {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(193, 138, 156, 0.86);
+  box-shadow: none;
+}
+
+[data-theme="canhong"] .side-item:hover,
+[data-theme="canhong"] .side-logout:hover,
+[data-theme="canhong"] .skin-switch:hover {
+  color: #f3edf2;
+  border-color: rgba(165, 158, 190, 0.1);
+  background: rgba(112, 111, 139, 0.13);
+}
+
+[data-theme="canhong"] .side-nav a.side-item.active {
+  color: #f2eaf0;
+  border-color: rgba(193, 138, 156, 0.22);
+  border-left-color: #a6344a;
+  border-radius: 7px;
+  background: linear-gradient(90deg, rgba(119, 8, 14, 0.34), rgba(73, 39, 63, 0.28));
+  clip-path: none;
+  box-shadow: inset 0 1px rgba(238, 231, 238, 0.045);
+}
+
+[data-theme="canhong"] .side-group > .side-item-row > a.side-item.active {
+  color: rgba(224, 218, 228, 0.82);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+[data-theme="canhong"] .side-group > .side-item-row > a.side-item.active:hover {
+  border-color: rgba(165, 158, 190, 0.1);
+  background: rgba(112, 111, 139, 0.13);
+}
+
+[data-theme="canhong"] .side-nav a.side-item.active .nav-icon {
+  border: 0;
+  background: transparent;
+  color: #c99bad;
+  box-shadow: none;
+}
+
+[data-theme="canhong"] .side-children {
+  border-left-color: rgba(193, 138, 156, 0.18);
+}
+
+[data-theme="canhong"] .side-poem {
+  position: relative;
+  margin-top: auto;
+  padding: 1.05rem 0.55rem 0.3rem 1.45rem;
+  color: rgba(193, 181, 199, 0.62);
+  border-color: rgba(165, 158, 190, 0.14);
+  font-family: var(--font-display);
+}
+
+[data-theme="canhong"] .side-poem-quote {
+  position: absolute;
+  top: 0.88rem;
+  left: 0.3rem;
+  color: rgba(193, 138, 156, 0.78);
+  font-family: Georgia, serif;
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+[data-theme="canhong"] .side-poem-text {
+  color: rgba(220, 210, 222, 0.7);
+  font-size: 0.88rem;
+  line-height: 1.85;
+  white-space: pre-line;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+[data-theme="canhong"] .side-poem-meta {
+  color: rgba(178, 174, 194, 0.48);
+  font-size: 0.7rem;
+}
+
+[data-theme="canhong"] .sidebar-dock {
+  border-top-color: rgba(165, 158, 190, 0.14);
+  background: rgba(20, 14, 26, 0.52);
+}
+
+[data-theme="canhong"] .theme-picker-label {
+  color: rgba(224, 210, 220, 0.75);
+  font-size: 0.9rem;
+}
+
+[data-theme="canhong"] .theme-picker-summary {
+  border-color: rgba(165, 158, 190, 0.18);
+  background: rgba(42, 29, 49, 0.64);
+}
+
+[data-theme="canhong"] .theme-picker-options {
+  border-color: rgba(165, 158, 190, 0.22);
+  background: rgba(27, 19, 34, 0.98);
+}
+
+[data-theme="canhong"] .skin-switch {
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+}
+
+[data-theme="canhong"] .skin-swatch {
+  width: 2.25rem;
+  height: 1rem;
+  border-color: rgba(224, 218, 228, 0.58);
+  border-radius: 4px;
+  background: linear-gradient(90deg, #211828 0 28%, #49273f 28% 52%, #706f8b 52% 72%, #77080e 72% 86%, #e1fdfe 86%);
+  transform: none;
+  box-shadow: 0 0 0 2px rgba(193, 138, 156, 0.1);
+}
+
+[data-theme="canhong"] .side-toggle-rail {
+  border-color: rgba(165, 158, 190, 0.28);
+  border-left-color: transparent;
+  border-radius: 0 9px 9px 0;
+  background: rgba(48, 34, 53, 0.96);
+  box-shadow: 5px 0 18px rgba(7, 3, 12, 0.3);
+}
+
+[data-theme="canhong"] .hero-copy,
+[data-theme="canhong"] .glass-panel,
+[data-theme="canhong"] .reader,
+[data-theme="canhong"] .panel,
+[data-theme="canhong"] .auth-card,
+[data-theme="canhong"] .keywords-page,
+[data-theme="canhong"] .stars-page,
+[data-theme="canhong"] .process-banner {
+  border-color: rgba(165, 158, 190, 0.24);
+  border-radius: var(--radius);
+  background: rgba(27, 20, 36, 0.82);
+  clip-path: none;
+  box-shadow: inset 0 1px rgba(238, 231, 238, 0.035), 0 26px 60px rgba(7, 3, 12, 0.28);
+}
+
+[data-theme="canhong"] .eyebrow::before {
+  display: none;
+}
+
+[data-theme="canhong"] .panel-head::after {
+  height: 1px;
+  background: linear-gradient(90deg, rgba(166, 52, 74, 0.84), rgba(166, 52, 74, 0));
+}
+
+[data-theme="canhong"] .btn,
+[data-theme="canhong"] .feed-pager-num,
+[data-theme="canhong"] .star-btn.wide,
+[data-theme="canhong"] .side-add-submit {
+  border-radius: 5px;
+  clip-path: none;
+}
+
+[data-theme="canhong"] .btn-solid,
+[data-theme="canhong"] .side-add-submit {
+  border-color: rgba(193, 138, 156, 0.3);
+  background: linear-gradient(180deg, #8f263b, #681b2d);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.08), 0 5px 16px rgba(74, 12, 29, 0.24);
+}
+
+[data-theme="canhong"] .form input,
+[data-theme="canhong"] .form textarea,
+[data-theme="canhong"] .form-row input,
+[data-theme="canhong"] .side-add-form {
+  border-radius: 5px;
+  border-color: rgba(165, 158, 190, 0.22);
+  background: rgba(17, 12, 23, 0.5);
+}
+
 [data-theme="canhong"] .feed-workspace {
   display: grid;
   grid-template-columns: minmax(610px, 1fr) minmax(295px, 350px);
@@ -4273,9 +4567,8 @@ a.auth-switch {
   position: absolute;
   inset: 0 0 0 auto;
   width: min(43%, 600px);
-  opacity: 0.26;
-  filter: grayscale(0.6) sepia(0.2) hue-rotate(285deg) saturate(0.8);
-  background: url('/images/diancui-pine-branch.png') right top / contain no-repeat;
+  opacity: 0.52;
+  background: url('/images/canhong-branch.png') right center / contain no-repeat;
   pointer-events: none;
 }
 
@@ -4376,10 +4669,69 @@ a.auth-switch {
   border-bottom-color: rgba(165, 158, 190, 0.13);
 }
 
+[data-theme="canhong"] .story-list {
+  border-top: 1px solid rgba(165, 158, 190, 0.08);
+}
+
+[data-theme="canhong"] .story:first-child {
+  margin: 0.5rem 0.65rem 0;
+  border: 1px solid rgba(193, 138, 156, 0.22);
+  border-left: 3px solid #a6344a;
+  border-radius: 7px 3px 7px 3px;
+  background: linear-gradient(90deg, rgba(119, 8, 14, 0.18), rgba(73, 39, 63, 0.1));
+}
+
 [data-theme="canhong"] .story:hover {
   background: linear-gradient(90deg, rgba(159, 38, 56, 0.12), transparent 62%);
   box-shadow: inset 2px 0 rgba(193, 138, 156, 0.68);
   transform: translateX(2px);
+}
+
+[data-theme="canhong"] .story:first-child:hover {
+  background: linear-gradient(90deg, rgba(119, 8, 14, 0.24), rgba(73, 39, 63, 0.13));
+  box-shadow: none;
+  transform: none;
+}
+
+[data-theme="canhong"] .story-meta {
+  color: rgba(178, 174, 194, 0.58);
+}
+
+[data-theme="canhong"] .story-title {
+  font-family: var(--font-display);
+  font-size: 1.03rem;
+  font-weight: 520;
+  letter-spacing: 0.025em;
+}
+
+[data-theme="canhong"] .story-summary {
+  max-width: none;
+  color: rgba(204, 199, 213, 0.66);
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+[data-theme="canhong"] .story-summary-short {
+  display: none;
+}
+
+[data-theme="canhong"] .story-summary-full {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+[data-theme="canhong"] .text-link,
+[data-theme="canhong"] .star-btn {
+  color: rgba(215, 195, 205, 0.78);
+}
+
+[data-theme="canhong"] .source-feed-url {
+  display: block;
+  padding: 0.3rem 0.1rem 0.9rem;
+  color: rgba(204, 199, 213, 0.68);
+  overflow-wrap: anywhere;
 }
 
 [data-theme="canhong"] .tag {
@@ -4395,7 +4747,16 @@ a.auth-switch {
 }
 
 @media (max-width: 960px) {
+  [data-theme="canhong"] .app-shell,
+  [data-theme="canhong"] .app-shell.sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
+
   [data-theme="canhong"] .workspace-masthead { min-height: 36px; }
+
+  [data-theme="canhong"] .stage-photo {
+    background-position: 52% center;
+  }
 }
 
 @media (max-width: 560px) {

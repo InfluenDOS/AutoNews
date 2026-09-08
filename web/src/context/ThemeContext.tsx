@@ -37,6 +37,7 @@ function isSkinId(value: string | null): value is SkinId {
 function readStoredSkin(): SkinId {
   try {
     const stored = localStorage.getItem(SKIN_STORAGE_KEY)
+    if (stored === 'canhong') return 'canhong'
     if (isSkinId(stored)) return 'forest'
   } catch {
     /* ignore */
