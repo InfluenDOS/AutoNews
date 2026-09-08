@@ -21,12 +21,13 @@ function Svg({ className, children }: IconProps & { children: ReactNode }) {
   )
 }
 
-/** 关键词 / tag */
+/** 关键词 / linked key nodes */
 export function IconKeywords({ className }: IconProps) {
   return (
     <Svg className={className}>
-      <path d="M20.6 12.6 12.6 20.6a2 2 0 0 1-2.8 0L3.4 14.2a2 2 0 0 1 0-2.8L11.4 3.4a2 2 0 0 1 1.4-.6H19a2 2 0 0 1 2 2v6.2a2 2 0 0 1-.6 1.4Z" />
-      <circle cx="16.2" cy="7.8" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="8" r="3" />
+      <circle cx="15.8" cy="5.7" r="2.1" />
+      <path d="M10.8 7.2 13.7 6.3M7.1 11l-3.6 8M9.8 10.1l4.5 8.2M12.7 15.3l-5.4 1" />
     </Svg>
   )
 }
@@ -89,13 +90,12 @@ export function IconChevron({ className }: IconProps) {
   )
 }
 
-/** 抓取源 */
+/** 抓取源 / globe */
 export function IconRss({ className }: IconProps) {
   return (
     <Svg className={className}>
-      <path d="M4 11a9 9 0 0 1 9 9" />
-      <path d="M4 4a16 16 0 0 1 16 16" />
-      <circle cx="5" cy="19" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.8 12h16.4M12 3.5c2.3 2.3 3.5 5.1 3.5 8.5S14.3 18.2 12 20.5M12 3.5C9.7 5.8 8.5 8.6 8.5 12s1.2 6.2 3.5 8.5" />
     </Svg>
   )
 }

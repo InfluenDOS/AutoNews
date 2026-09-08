@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useParams } from 'react-router-dom'
 import { ArticleCard } from '../components/ArticleCard'
 import { FeedPager } from '../components/FeedPager'
+import { ProcessBanner } from '../components/ProcessBanner'
+import { WorkspaceMasthead } from '../components/WorkspaceMasthead'
 import { useAuth } from '../context/AuthContext'
 import { useJobs, useJobsRefresh, useJobsStatus } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
@@ -606,21 +608,24 @@ export function KeywordFeedPage({ all = false }: Props) {
   const keywordsBooting = kwLoading && keywords.length === 0
 
   return (
-    <>
-      <section className="hero">
-        <div className="hero-copy">
-          <p className="eyebrow">{all ? 'All Keywords' : 'Keyword Feed'}</p>
-          <h1>{title}</h1>
-          <p className="hero-lead">{keywordsBooting ? '加载关键词中…' : lead}</p>
-          <div className="hero-footer">
-            <LastUpdatedLine loading={loading || keywordsBooting} latestHit={latestHit} />
-            <HeroCrawl keywordId={all ? null : keyword?.id} onTriggered={onCrawlTriggered} />
-          </div>
-        </div>
-        <div className="hero-window" aria-hidden="true" />
-      </section>
+    <div className="feed-workspace">
+      <WorkspaceMasthead />
 
-      <section className="glass-panel feed">
+      <div className="feed-primary">
+        <section className="hero">
+          <div className="hero-copy">
+            <p className="eyebrow">{all ? 'All Keywords' : 'Keyword Feed'}</p>
+            <h1>{title}</h1>
+            <p className="hero-lead">{keywordsBooting ? '加载关键词中…' : lead}</p>
+            <div className="hero-footer">
+              <LastUpdatedLine loading={loading || keywordsBooting} latestHit={latestHit} />
+              <HeroCrawl keywordId={all ? null : keyword?.id} onTriggered={onCrawlTriggered} />
+            </div>
+          </div>
+          <div className="hero-window" aria-hidden="true" />
+        </section>
+
+        <section className="glass-panel feed">
         <div className="panel-head">
           <h2>{aiPending && !showFeed ? 'AI 进程' : '匹配结果'}</h2>
           <span className="muted">
@@ -678,7 +683,36 @@ export function KeywordFeedPage({ all = false }: Props) {
             </p>
           </div>
         ) : null}
-      </section>
-    </>
+        </section>
+      </div>
+
+      <aside className="editorial-rail" aria-label="编辑部信息">
+        <div className="editorial-rail-image" aria-hidden="true" />
+        <section className="editorial-rail-card">
+          <LastUpdatedLine loading={loading || keywordsBooting} latestHit={latestHit} />
+          <p className="editorial-rail-stats">
+            数据来源：{extraNewsNames.length} 个
+            <span aria-hidden="true">｜</span>
+            本页结果：{loading || keywordsBooting ? '—' : storyGroups.length} 条
+          </p>
+        </section>
+        <section className="editorial-process-shell">
+          <ProcessBanner />
+          <div className="editorial-idle-status">
+            <div>
+              <strong>后台空闲</strong>
+              <span>等待下一次任务</span>
+            </div>
+            <ol>
+              <li className="is-done">抓取最新资讯</li>
+              <li className="is-done">去重与清洗</li>
+              <li className="is-done">关键词匹配</li>
+              <li className="is-done">结果入库</li>
+            </ol>
+            <p>后台运行不影响浏览，新任务开始后会在这里显示进度。</p>
+          </div>
+        </section>
+      </aside>
+    </div>
   )
 }

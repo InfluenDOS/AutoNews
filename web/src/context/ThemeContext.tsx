@@ -7,11 +7,13 @@ import {
   type ReactNode,
 } from 'react'
 
-export const SKIN_STORAGE_KEY = 'autonews-skin'
+export const SKIN_STORAGE_KEY = 'autonews-skin-v2'
 
 export const SKINS = [
+  { id: 'jimo', label: '即墨' },
   { id: 'forest', label: '点翠' },
   { id: 'canhong', label: '残红' },
+  { id: 'yuerugou', label: '月如钩' },
 ] as const
 
 export type SkinId = (typeof SKINS)[number]['id']
@@ -35,7 +37,7 @@ function isSkinId(value: string | null): value is SkinId {
 function readStoredSkin(): SkinId {
   try {
     const stored = localStorage.getItem(SKIN_STORAGE_KEY)
-    if (isSkinId(stored)) return stored
+    if (isSkinId(stored)) return 'forest'
   } catch {
     /* ignore */
   }
@@ -43,7 +45,7 @@ function readStoredSkin(): SkinId {
 }
 
 function applySkin(id: SkinId) {
-  document.documentElement.dataset.theme = id
+  document.documentElement.dataset.theme = id === 'forest' ? 'jimo' : id
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {

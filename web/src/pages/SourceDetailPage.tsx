@@ -1,4 +1,5 @@
 import { Navigate, useParams } from 'react-router-dom'
+import { WorkspaceMasthead } from '../components/WorkspaceMasthead'
 import { useAuth } from '../context/AuthContext'
 import { useSources, type SourceListItem } from '../context/SourcesContext'
 import type { SourceFeed } from '../types'
@@ -70,6 +71,7 @@ export function SourceDetailPage({ all = false }: { all?: boolean }) {
 
   return (
     <>
+      <WorkspaceMasthead />
       <section className="hero">
         <div className="hero-copy">
           <p className="eyebrow">{all ? 'Crawl Sources' : 'Source Detail'}</p>

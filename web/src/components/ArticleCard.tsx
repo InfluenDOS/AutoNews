@@ -50,7 +50,12 @@ export const ArticleCard = memo(function ArticleCard({
         <Link to={`/article/${article.id}`}>{title}</Link>
       </h2>
 
-      {preview && <p className="story-summary">{preview}</p>}
+      {preview && (
+        <p className="story-summary">
+          <span className="story-summary-short">{preview}</span>
+          <span className="story-summary-full">{summary}</span>
+        </p>
+      )}
       {!translated && <p className="card-hint">等待中文改写</p>}
 
       <div className="story-actions">

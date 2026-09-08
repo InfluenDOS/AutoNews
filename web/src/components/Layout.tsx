@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useJobsRefresh } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
 import { useSources } from '../context/SourcesContext'
+import { useTheme } from '../context/ThemeContext'
 import { loadDailyPoem, type DailyPoem } from '../lib/dailyPoem'
 import { ProcessBanner } from './ProcessBanner'
 import { BrandLogo } from './BrandLogo'
@@ -24,11 +25,17 @@ const STORAGE_KEY = 'autonews-sidebar-collapsed'
 const KW_OPEN_KEY = 'autonews-kw-open-v2'
 const SRC_OPEN_KEY = 'autonews-src-open-v1'
 const MOBILE_MQ = '(max-width: 960px)'
+const FALLBACK_POEM: DailyPoem = {
+  text: '溪云初起日沉阁，\n山雨欲来风满楼。',
+  author: '许浑',
+  source: '《咸阳城西楼晚眺》',
+}
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const { user, signOut, configured } = useAuth()
   const { keywords, addKeyword, deleteKeyword } = useKeywords()
   const { items: sourceItems, addSource, deleteSource } = useSources()
+  const { skin } = useTheme()
   const refreshJobs = useJobsRefresh()
   const navigate = useNavigate()
   const location = useLocation()
@@ -45,7 +52,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [kwOpen, setKwOpen] = useState(() => {
     try {
       const v = localStorage.getItem(KW_OPEN_KEY)
-      return v === null ? false : v === '1'
+      return v === null ? true : v === '1'
     } catch {
       return false
     }
@@ -321,6 +328,21 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 aria-hidden={!kwOpen}
               >
                 <div className="side-children">
+                  <div className="side-kw-row">
+                    <NavLink
+                      to="/keywords"
+                      className="side-item side-item-child side-item-grow"
+                      title="全部关键词"
+                      end
+                      tabIndex={kwOpen ? undefined : -1}
+                    >
+                      <span className="nav-icon" aria-hidden>
+                        <IconHash />
+                      </span>
+                      <span className="nav-label">全部关键词</span>
+                    </NavLink>
+                  </div>
+
                   {user &&
                     keywords.map((k) => (
                       <div key={k.id} className="side-kw-row">
@@ -546,47 +568,59 @@ export function Layout({ children }: { children: React.ReactNode }) {
               </div>
             )}
 
-            <NavLink to="/stars" className="side-item" title="收藏夹">
-              <span className="nav-icon" aria-hidden>
-                <IconStar />
-              </span>
-              <span className="nav-label">收藏夹</span>
-            </NavLink>
-
-            {!user ? (
-              <NavLink to="/auth" className="side-item" title="登录 / 注册">
+            <div className="side-group side-primary-section">
+              <NavLink to="/stars" className="side-item" title="收藏夹">
                 <span className="nav-icon" aria-hidden>
-                  <IconLogin />
+                  <IconStar />
                 </span>
-                <span className="nav-label">登录 / 注册</span>
+                <span className="nav-label">收藏夹</span>
               </NavLink>
-            ) : (
-              <button
-                type="button"
-                className="side-item side-logout"
-                title="退出登录"
-                onClick={() => {
-                  if (window.confirm('确定要退出登录吗？')) {
-                    void signOut()
-                  }
-                }}
-              >
-                <span className="nav-icon" aria-hidden>
-                  <IconLogout />
-                </span>
-                <span className="nav-label">退出登录</span>
-              </button>
-            )}
+            </div>
+
+            <div className="side-group side-primary-section">
+              {!user ? (
+                <NavLink to="/auth" className="side-item" title="登录 / 注册">
+                  <span className="nav-icon" aria-hidden>
+                    <IconLogin />
+                  </span>
+                  <span className="nav-label">登录 / 注册</span>
+                </NavLink>
+              ) : (
+                <button
+                  type="button"
+                  className="side-item side-logout"
+                  title="退出登录"
+                  onClick={() => {
+                    if (window.confirm('确定要退出登录吗？')) {
+                      void signOut()
+                    }
+                  }}
+                >
+                  <span className="nav-icon" aria-hidden>
+                    <IconLogout />
+                  </span>
+                  <span className="nav-label">退出登录</span>
+                </button>
+              )}
+            </div>
           </nav>
 
-          {poem && (
-            <div className="side-poem">
-              <p className="side-poem-text">{poem.text}</p>
-              <p className="side-poem-meta">
-                —— {poem.author} · {poem.source}
-              </p>
-            </div>
-          )}
+          <div className={`side-poem${skin === 'jimo' || skin === 'forest' ? ' is-design-poem' : ''}`}>
+            <span className="side-poem-quote" aria-hidden>“</span>
+            {skin === 'jimo' || skin === 'forest' ? (
+              <>
+                <p className="side-poem-text">{FALLBACK_POEM.text}</p>
+                <p className="side-poem-meta">—— {FALLBACK_POEM.author} {FALLBACK_POEM.source}</p>
+              </>
+            ) : (
+              <>
+                <p className="side-poem-text">{(poem ?? FALLBACK_POEM).text}</p>
+                <p className="side-poem-meta">
+                  —— {(poem ?? FALLBACK_POEM).author} · {(poem ?? FALLBACK_POEM).source}
+                </p>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="sidebar-dock">
