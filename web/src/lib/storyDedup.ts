@@ -91,12 +91,12 @@ export function storiesNearDuplicate(a: Article, b: Article, threshold = STORY_D
 }
 
 function preferCanonical(a: Article, b: Article): number {
+  const ta = publishedMs(a.published_at)
+  const tb = publishedMs(b.published_at)
+  if (ta && tb && ta !== tb) return tb - ta
   const azh = (a.title_zh || '').trim() ? 1 : 0
   const bzh = (b.title_zh || '').trim() ? 1 : 0
   if (azh !== bzh) return bzh - azh
-  const ta = publishedMs(a.published_at)
-  const tb = publishedMs(b.published_at)
-  if (ta && tb && ta !== tb) return ta - tb
   return a.id.localeCompare(b.id)
 }
 

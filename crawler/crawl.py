@@ -38,6 +38,10 @@ USER_AGENT = "AutoNewsBot/1.0 (+https://github.com/AutoNews; RSS aggregator)"
 BODY_FETCH_MAX = int(os.environ.get("BODY_FETCH_MAX", "300"))
 # Cap on articles stored as keyword candidates this run (preview pool is separate).
 CANDIDATE_STORE_MAX = int(os.environ.get("CANDIDATE_STORE_MAX", "400"))
+# Do not reinsert an old URL after retention cleanup merely because it remains
+# in a long RSS feed. Missing/unparseable publication dates are still accepted
+# and will age out according to articles.created_at.
+ARTICLE_RETENTION_DAYS = int(os.environ.get("ARTICLE_RETENTION_DAYS", "20"))
 
 
 def get_supabase() -> Client:
@@ -89,13 +93,21 @@ def entry_to_article(source_name: str, entry: dict[str, Any]) -> dict[str, Any] 
 
         summary = re.sub(r"<[^>]+>", " ", summary)
         summary = re.sub(r"\s+", " ", summary).strip()
+    published_at = parse_published(entry)
+    if published_at:
+        try:
+            published = datetime.fromisoformat(published_at)
+            if published < datetime.now(timezone.utc) - timedelta(days=ARTICLE_RETENTION_DAYS):
+                return None
+        except ValueError:
+            pass
     combined = f"{title} {summary}"
     return {
         "source": source_name,
         "title": title[:500],
         "summary": summary[:2000],
         "url": link[:2000],
-        "published_at": parse_published(entry),
+        "published_at": published_at,
         "raw_text_normalized": normalize_for_match(combined)[:8000],
     }
 

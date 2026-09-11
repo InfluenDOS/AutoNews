@@ -54,6 +54,7 @@ const paired = groupStoriesWithPairs(
 )
 check('transitive pairs form one story', paired.length === 1)
 check('one canonical plus two alternate sources', paired[0].alts.length === 2)
+check('newest source is the canonical story card', paired[0].article.id === 'a')
 
 const different = article(
   'd',

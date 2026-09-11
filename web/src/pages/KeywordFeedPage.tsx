@@ -20,8 +20,6 @@ import type { Article, Keyword } from '../types'
 
 const REFRESH_MS = 60_000
 const PAGE_SIZE = 20
-/** Hit pages to scan while filling one visible page (all-keywords). */
-const MAX_SCAN_PAGES = 80
 
 function formatUpdatedAt(value: string | number | Date | null | undefined) {
   if (!value) return null
@@ -44,13 +42,6 @@ type Props = {
 
 type HitRow = {
   article_id: string
-  created_at?: string
-  articles?: Article | Article[] | null
-}
-
-type RelRow = {
-  article_id: string
-  relevant: boolean
   created_at?: string
   articles?: Article | Article[] | null
 }
@@ -92,38 +83,36 @@ async function fetchRelevanceMap(
   return relMap
 }
 
-/** Exact relevant-row count for one keyword, or distinct article ids across many. */
-async function countRelevantArticles(keywordIds: string[]): Promise<number> {
+/** Count the same top-level rows that the corresponding feed query paginates. */
+async function countFeedArticles(
+  keywordIds: string[],
+  userId: string,
+  all: boolean,
+): Promise<number> {
   const kids = keywordIds.filter(Boolean)
   if (kids.length === 0) return 0
 
-  if (kids.length === 1) {
+  if (all) {
     const { count, error } = await supabase
-      .from('article_keyword_relevance')
+      .from('article_hits')
       .select('article_id', { count: 'exact', head: true })
-      .eq('keyword_id', kids[0])
-      .eq('relevant', true)
+      .eq('user_id', userId)
     if (error) throw new Error(error.message)
     return count ?? 0
   }
 
-  const seen = new Set<string>()
-  let offset = 0
-  for (;;) {
-    const { data, error } = await supabase
-      .from('article_keyword_relevance')
-      .select('article_id')
-      .in('keyword_id', kids)
-      .eq('relevant', true)
-      .range(offset, offset + 999)
-    if (error) throw new Error(error.message)
-    const rows = (data as { article_id: string }[]) ?? []
-    for (const row of rows) seen.add(row.article_id)
-    if (rows.length < 1000) break
-    offset += 1000
-    if (offset >= 20_000) break
-  }
-  return seen.size
+  const { count, error } = await supabase
+    .from('article_keyword_relevance')
+    .select('article_id', { count: 'exact', head: true })
+    .eq('keyword_id', kids[0])
+    .eq('relevant', true)
+  if (error) throw new Error(error.message)
+  return count ?? 0
+}
+
+type FeedRpcRow = Article & {
+  article_id: string
+  matched_at?: string
 }
 
 function AiProgressPanel({
@@ -288,25 +277,23 @@ export function KeywordFeedPage({ all = false }: Props) {
 
       if (opts.singleKeyword) {
         const kid = opts.singleKeyword.id
-        const relRes = await supabase
-          .from('article_keyword_relevance')
-          .select(`article_id, relevant, created_at, articles(${ARTICLE_LIST_COLUMNS})`)
-          .eq('keyword_id', kid)
-          .eq('relevant', true)
-          .order('created_at', { ascending: false })
-          .range(offset, offset + PAGE_SIZE - 1)
+        const relRes = await supabase.rpc('get_keyword_feed_page', {
+          p_keyword_id: kid,
+          p_offset: offset,
+          p_limit: PAGE_SIZE,
+        })
 
         if (relRes.error) throw new Error(relRes.error.message)
-        const rows = (relRes.data as RelRow[]) ?? []
+        const rows = (relRes.data as FeedRpcRow[]) ?? []
         const exhausted = rows.length < PAGE_SIZE
 
         for (const row of rows) {
-          const a = unwrapArticle(row.articles)
+          const a = row as Article
           if (!a || seen.has(a.id) || !isNewsSource(a.source, extraNewsNames)) continue
           seen.add(a.id)
           list.push(a)
           relMap.set(`${kid}:${a.id}`, true)
-          const t = Date.parse(row.created_at || '') || 0
+          const t = Date.parse(row.matched_at || '') || 0
           if (t > 0) matchedAt.set(a.id, t)
         }
 
@@ -348,10 +335,11 @@ export function KeywordFeedPage({ all = false }: Props) {
         }
 
         list.sort((a, b) => {
-          const ta = a.published_at ? Date.parse(a.published_at) : 0
-          const tb = b.published_at ? Date.parse(b.published_at) : 0
-          return tb - ta
+          const ta = Date.parse(a.published_at || a.created_at) || 0
+          const tb = Date.parse(b.published_at || b.created_at) || 0
+          return tb - ta || b.id.localeCompare(a.id)
         })
+
         return {
           list,
           matchedAt,
@@ -362,71 +350,41 @@ export function KeywordFeedPage({ all = false }: Props) {
       }
 
       const kids = opts.ready.map((k) => k.id).filter(Boolean)
-      const skip = offset
-      const need = skip + PAGE_SIZE
-      const collected: Article[] = []
-      let hitOffset = 0
-      let exhausted = false
-      let pages = 0
-      const maxScan = Math.min(MAX_SCAN_PAGES, Math.max(12, Math.ceil(need / 3) + 8))
+      const { data: hitRows, error: hitErr } = await supabase.rpc('get_keyword_feed_page', {
+        p_keyword_id: null,
+        p_offset: offset,
+        p_limit: PAGE_SIZE,
+      })
 
-      while (collected.length < need && pages < maxScan) {
-        const { data: hitRows, error: hitErr } = await supabase
-          .from('article_hits')
-          .select(`article_id, created_at, articles(${ARTICLE_LIST_COLUMNS})`)
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .range(hitOffset, hitOffset + PAGE_SIZE - 1)
-
-        if (hitErr) throw new Error(hitErr.message)
-
-        const rows = (hitRows as HitRow[]) ?? []
-        if (rows.length < PAGE_SIZE) exhausted = true
-        hitOffset += rows.length
-        pages += 1
-
-        const pageArticles: Article[] = []
-        for (const hit of rows) {
-          const a = unwrapArticle(hit.articles)
-          if (!a || seen.has(a.id) || !isNewsSource(a.source, extraNewsNames)) continue
-          seen.add(a.id)
-          pageArticles.push(a)
-          const t = Date.parse(hit.created_at || '') || 0
-          if (t > 0) matchedAt.set(a.id, t)
-        }
-
-        if (pageArticles.length === 0) {
-          if (exhausted) break
-          continue
-        }
-
-        const pageRel = await fetchRelevanceMap(
-          kids,
-          pageArticles.map((a) => a.id),
-        )
-        for (const [k, v] of pageRel) relMap.set(k, v)
-
-        for (const a of pageArticles) {
-          if (opts.ready.some((k) => articleMatchesKeyword(a, k, relMap))) {
-            collected.push(a)
-          }
-        }
-
-        if (exhausted) break
+      if (hitErr) throw new Error(hitErr.message)
+      const rows = (hitRows as FeedRpcRow[]) ?? []
+      const pageArticles: Article[] = []
+      for (const hit of rows) {
+        const a = hit as Article
+        if (!a || seen.has(a.id) || !isNewsSource(a.source, extraNewsNames)) continue
+        seen.add(a.id)
+        pageArticles.push(a)
+        const t = Date.parse(hit.matched_at || '') || 0
+        if (t > 0) matchedAt.set(a.id, t)
       }
 
-      const pageList = collected.slice(skip, skip + PAGE_SIZE)
-      pageList.sort((a, b) => {
-        const ta = a.published_at ? Date.parse(a.published_at) : 0
-        const tb = b.published_at ? Date.parse(b.published_at) : 0
-        return tb - ta
-      })
-      const hasMore = collected.length > skip + pageList.length || (!exhausted && pageList.length === PAGE_SIZE)
+      const pageRel = await fetchRelevanceMap(
+        kids,
+        pageArticles.map((a) => a.id),
+      )
+      for (const [k, v] of pageRel) relMap.set(k, v)
+
+      // article_hits is the crawler's approved, per-user feed. Runtime matching is
+      // retained as a guard for stale rows until the next crawler cleanup, but the
+      // browser no longer scans every preceding page to find this page.
+      const pageList = pageArticles.filter((a) =>
+        opts.ready.some((k) => articleMatchesKeyword(a, k, relMap)),
+      )
       return {
         list: pageList,
         matchedAt,
         relMap,
-        exhausted: !hasMore,
+        exhausted: rows.length < PAGE_SIZE,
         totalPages: null,
       }
     },
@@ -461,8 +419,10 @@ export function KeywordFeedPage({ all = false }: Props) {
         const countPromise =
           cachedCount != null && mode !== 'silent'
             ? Promise.resolve(cachedCount)
-            : countRelevantArticles(
+            : countFeedArticles(
                 single ? [single.id] : ready.map((k) => k.id).filter(Boolean),
+                user.id,
+                all,
               )
         const [batch, matchCount] = await Promise.all([
           fetchBatch({
