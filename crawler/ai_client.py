@@ -31,6 +31,10 @@ def chat_json(system: str, user: str, *, temperature: float = 0.2, max_tokens: i
     url = f"{base}/v1/chat/completions"
     payload = {
         "model": model,
+        # DeepSeek V4.1 enables high-effort thinking by default. These calls need
+        # compact, deterministic JSON; reasoning can consume the completion budget
+        # before the final JSON is emitted.
+        "thinking": {"type": "disabled"},
         "temperature": temperature,
         "max_tokens": max_tokens,
         "messages": [
@@ -43,16 +47,36 @@ def chat_json(system: str, user: str, *, temperature: float = 0.2, max_tokens: i
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
+    last_parse_error: Exception | None = None
+    supports_response_format = True
     with httpx.Client(timeout=90.0) as client:
-        resp = client.post(url, headers=headers, json=payload)
-        # Some providers ignore response_format; retry without it on 400
-        if resp.status_code >= 400 and "response_format" in (resp.text or ""):
-            payload.pop("response_format", None)
-            resp = client.post(url, headers=headers, json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-    content = data["choices"][0]["message"]["content"]
-    return _parse_json_object(content)
+        for attempt in range(2):
+            request_payload = dict(payload)
+            if attempt:
+                # A single bounded retry for DeepSeek's documented occasional empty
+                # JSON response or a completion truncated at the original ceiling.
+                request_payload["max_tokens"] = min(max(max_tokens * 2, 1200), 5000)
+            if not supports_response_format:
+                request_payload.pop("response_format", None)
+
+            resp = client.post(url, headers=headers, json=request_payload)
+            # Some OpenAI-compatible providers reject response_format; remember that
+            # capability decision so a JSON-content retry does not repeat the 400.
+            if resp.status_code >= 400 and "response_format" in (resp.text or ""):
+                supports_response_format = False
+                request_payload.pop("response_format", None)
+                resp = client.post(url, headers=headers, json=request_payload)
+            resp.raise_for_status()
+            data = resp.json()
+            content = data["choices"][0]["message"].get("content") or ""
+            try:
+                return _parse_json_object(content)
+            except (ValueError, json.JSONDecodeError) as exc:
+                last_parse_error = exc
+
+    if last_parse_error:
+        raise last_parse_error
+    raise ValueError("Model did not return JSON")
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:
