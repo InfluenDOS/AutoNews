@@ -40,7 +40,7 @@ jobs:
           AI_MODEL: ${{ vars.AI_MODEL }}
         run: |
           export AI_BASE_URL="${AI_BASE_URL:-https://api.deepseek.com}"
-          export AI_MODEL="${AI_MODEL:-deepseek-v4-flash}"
+          export AI_MODEL="${AI_MODEL:-deepseek-flash}"
           echo "AI model: ${AI_MODEL}"
           python process_ai.py --keywords-only
 
@@ -62,7 +62,7 @@ jobs:
           BODY_FETCH_CONCURRENCY: "12"
         run: |
           export AI_BASE_URL="${AI_BASE_URL:-https://api.deepseek.com}"
-          export AI_MODEL="${AI_MODEL:-deepseek-v4-flash}"
+          export AI_MODEL="${AI_MODEL:-deepseek-flash}"
           echo "AI model: ${AI_MODEL}"
           python crawl.py
 
@@ -76,6 +76,6 @@ jobs:
           AI_MODEL: ${{ vars.AI_MODEL }}
         run: |
           export AI_BASE_URL="${AI_BASE_URL:-https://api.deepseek.com}"
-          export AI_MODEL="${AI_MODEL:-deepseek-v4-flash}"
+          export AI_MODEL="${AI_MODEL:-deepseek-flash}"
           echo "AI model: ${AI_MODEL}"
           python process_ai.py --translate-only

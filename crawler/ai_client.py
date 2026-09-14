@@ -18,8 +18,8 @@ def _settings() -> tuple[str, str, str]:
     key = os.environ.get("AI_API_KEY", "").strip()
     base = os.environ.get("AI_BASE_URL", "https://api.deepseek.com").rstrip("/")
     model = (
-        os.environ.get("AI_MODEL", "deepseek-v4-flash").strip()
-        or "deepseek-v4-flash"
+        os.environ.get("AI_MODEL", "deepseek-flash").strip()
+        or "deepseek-flash"
     )
     if not key:
         raise RuntimeError("AI_API_KEY is not set")
