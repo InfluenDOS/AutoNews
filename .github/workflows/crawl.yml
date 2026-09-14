@@ -37,10 +37,11 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
-          AI_MODEL: ${{ secrets.AI_MODEL }}
+          AI_MODEL: ${{ vars.AI_MODEL }}
         run: |
           export AI_BASE_URL="${AI_BASE_URL:-https://api.deepseek.com}"
-          export AI_MODEL="${AI_MODEL:-deepseek-chat}"
+          export AI_MODEL="${AI_MODEL:-deepseek-v4-flash}"
+          echo "AI model: ${AI_MODEL}"
           python process_ai.py --keywords-only
 
       - name: Crawl RSS (match + relevance)
@@ -50,7 +51,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
-          AI_MODEL: ${{ secrets.AI_MODEL }}
+          AI_MODEL: ${{ vars.AI_MODEL }}
           # Topic shortlist (place-only is not enough), then AI reads bodies.
           # Verdicts are cached per (keyword, article); a retract pass drops
           # historical entertainment / off-country / place-only false positives.
@@ -61,7 +62,8 @@ jobs:
           BODY_FETCH_CONCURRENCY: "12"
         run: |
           export AI_BASE_URL="${AI_BASE_URL:-https://api.deepseek.com}"
-          export AI_MODEL="${AI_MODEL:-deepseek-chat}"
+          export AI_MODEL="${AI_MODEL:-deepseek-v4-flash}"
+          echo "AI model: ${AI_MODEL}"
           python crawl.py
 
       - name: Translate matched articles
@@ -71,8 +73,9 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
-          AI_MODEL: ${{ secrets.AI_MODEL }}
+          AI_MODEL: ${{ vars.AI_MODEL }}
         run: |
           export AI_BASE_URL="${AI_BASE_URL:-https://api.deepseek.com}"
-          export AI_MODEL="${AI_MODEL:-deepseek-chat}"
+          export AI_MODEL="${AI_MODEL:-deepseek-v4-flash}"
+          echo "AI model: ${AI_MODEL}"
           python process_ai.py --translate-only

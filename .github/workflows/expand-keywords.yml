@@ -28,8 +28,9 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
-          AI_MODEL: ${{ secrets.AI_MODEL }}
+          AI_MODEL: ${{ vars.AI_MODEL }}
         run: |
           export AI_BASE_URL="${AI_BASE_URL:-https://api.deepseek.com}"
-          export AI_MODEL="${AI_MODEL:-deepseek-chat}"
+          export AI_MODEL="${AI_MODEL:-deepseek-v4-flash}"
+          echo "AI model: ${AI_MODEL}"
           python process_ai.py --keywords-only
