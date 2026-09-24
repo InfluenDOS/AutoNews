@@ -1,29 +1,46 @@
 import { useEffect, useState } from 'react'
-import { msUntilNextSlot, poemForSlot, poemSlot, type Poem } from '../lib/poems'
+import { FALLBACK_POEM, POEM_ROTATE_MS, loadPoems, pickPoem, type Poem } from '../lib/poems'
 
-/** The couplet for the current half hour; switches on :00 and :30. */
-export function useHalfHourPoem(): Poem {
-  const [slot, setSlot] = useState(() => poemSlot())
+/**
+ * A random couplet on every page load, replaced by another every half hour
+ * while the page stays open. `null` until the couplet file has loaded.
+ */
+export function useHalfHourPoem(): Poem | null {
+  const [poem, setPoem] = useState<Poem | null>(null)
 
   useEffect(() => {
+    let cancelled = false
     let timer = 0
-    const sync = () => {
-      setSlot(poemSlot())
+    let shownAt = 0
+    let list: Poem[] = []
+
+    const next = () => {
+      if (cancelled) return
+      setPoem(list.length ? pickPoem(list) : FALLBACK_POEM)
+      shownAt = Date.now()
       window.clearTimeout(timer)
-      // A little past the boundary so the new slot is certain.
-      timer = window.setTimeout(sync, msUntilNextSlot() + 500)
+      timer = window.setTimeout(next, POEM_ROTATE_MS)
     }
-    // Background tabs throttle timers; catch up as soon as the tab is visible.
+    // Background tabs throttle timers; catch up once the tab is visible again.
     const onVisible = () => {
-      if (!document.hidden) sync()
+      if (!document.hidden && shownAt && Date.now() - shownAt >= POEM_ROTATE_MS) next()
     }
-    timer = window.setTimeout(sync, msUntilNextSlot() + 500)
+
+    loadPoems()
+      .then((loaded) => {
+        list = loaded
+      })
+      .catch(() => {
+        list = []
+      })
+      .finally(next)
     document.addEventListener('visibilitychange', onVisible)
     return () => {
+      cancelled = true
       window.clearTimeout(timer)
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [])
 
-  return poemForSlot(slot)
+  return poem
 }

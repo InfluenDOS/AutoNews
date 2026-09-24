@@ -1,4 +1,6 @@
-import { POEMS, POEM_SLOT_MS, msUntilNextSlot, poemForSlot, poemSlot } from '../src/lib/poems.ts'
+import { readFileSync } from 'node:fs'
+import OpenCC from 'opencc-js'
+import { FALLBACK_POEM, pickPoem, toPoem, type PoemFile } from '../src/lib/poems.ts'
 
 let failed = 0
 function check(ok: boolean, label: string) {
@@ -9,25 +11,31 @@ function check(ok: boolean, label: string) {
   }
 }
 
+const file = JSON.parse(
+  readFileSync(new URL('../public/poems/qiyan.json', import.meta.url), 'utf8'),
+) as PoemFile
+const poems = file.poems.map(toPoem)
+
 const HAN = /^\p{Script=Han}{7}$/u
-const badLines = POEMS.flatMap((p) => p.lines.filter((line) => !HAN.test(line)).map((l) => `${l}（${p.author}）`))
+const badLines = [...poems, FALLBACK_POEM].flatMap((p) =>
+  p.lines.filter((line) => !HAN.test(line)).map((line) => `${line}（${p.author}）`),
+)
 check(badLines.length === 0, `every line is exactly seven Han characters${badLines.length ? `: ${badLines.join('、')}` : ''}`)
 
-const keys = POEMS.map((p) => p.lines.join(''))
+const keys = poems.map((p) => p.lines.join(''))
 check(new Set(keys).size === keys.length, 'no duplicate couplets')
-check(POEMS.every((p) => p.author && p.title), 'every couplet has an author and a title')
-check(POEMS.length >= 96, `at least two days of half hours without repeats (${POEMS.length})`)
+check(poems.every((p) => p.author && p.title), 'every couplet has an author and a title')
+check(poems.length >= 800, `a large pool (${poems.length} couplets)`)
+check(Boolean(file.source && /^[0-9a-f]{40}$/.test(file.commit)), 'source and pinned commit are recorded')
 
-const cycle = new Set(Array.from({ length: POEMS.length }, (_, i) => poemForSlot(i).lines.join('')))
-check(cycle.size === POEMS.length, 'one full cycle shows every couplet once')
+const toSimplified = OpenCC.Converter({ from: 't', to: 'cn' })
+const traditional = poems.filter((p) => toSimplified(p.lines.join('') + p.author + p.title) !== p.lines.join('') + p.author + p.title)
+check(traditional.length === 0, `text is simplified Chinese${traditional.length ? `: ${traditional[0].lines.join('，')}` : ''}`)
 
-const sameAuthorRuns = Array.from({ length: POEMS.length }, (_, i) => poemForSlot(i).author === poemForSlot(i + 1).author).filter(Boolean).length
-check(sameAuthorRuns <= POEMS.length / 10, `consecutive half hours rarely share a poet (${sameAuthorRuns})`)
-
-const t = Date.UTC(2026, 8, 24, 10, 29, 59, 0)
-check(poemSlot(t) + 1 === poemSlot(t + 1000), 'slot changes on the half hour')
-check(msUntilNextSlot(t) === 1000, 'time to next slot is measured to the boundary')
-check(poemSlot(t + POEM_SLOT_MS) === poemSlot(t) + 1, 'one slot per half hour')
+const previous = poems[0].lines[0]
+const picks = Array.from({ length: 200 }, () => pickPoem([poems[0], poems[1]], previous))
+check(picks.every((p) => p.lines[0] !== previous), 'a new pick never repeats the previous couplet')
+check(pickPoem([]) === FALLBACK_POEM, 'an empty list falls back')
 
 if (failed) {
   console.error(`${failed} poem check(s) failed`)

@@ -5,6 +5,7 @@ import { useJobsRefresh } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
 import { useSources } from '../context/SourcesContext'
 import { useHalfHourPoem } from '../hooks/useHalfHourPoem'
+import { FALLBACK_POEM } from '../lib/poems'
 import { ProcessBanner } from './ProcessBanner'
 import { BrandLogo } from './BrandLogo'
 import { ThemeToggle } from './ThemeToggle'
@@ -51,6 +52,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const srcInputRef = useRef<HTMLInputElement>(null)
   const srcFormRef = useRef<HTMLFormElement>(null)
   const poem = useHalfHourPoem()
+  const shownPoem = poem ?? FALLBACK_POEM
 
   function cancelAdd() {
     if (addBusy) return
@@ -502,14 +504,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </section>
         </nav>
 
-        <figure className="rail-poem">
+        {/* Until the couplet file loads, the fallback holds the space invisibly. */}
+        <figure className={`rail-poem${poem ? ' is-ready' : ''}`} aria-hidden={!poem}>
           <blockquote>
-            {poem.lines[0]}，
+            {shownPoem.lines[0]}，
             <br />
-            {poem.lines[1]}。
+            {shownPoem.lines[1]}。
           </blockquote>
           <figcaption>
-            {poem.author}《{poem.title}》
+            {shownPoem.author}《{shownPoem.title}》
           </figcaption>
         </figure>
 
