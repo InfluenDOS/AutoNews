@@ -111,6 +111,12 @@ class _FakeQuery:
     def limit(self, *_a, **_k):
         return self
 
+    def order(self, *_a, **_k):
+        return self
+
+    def range(self, *_a, **_k):
+        return self
+
     def upsert(self, rows, **_k):
         self.store.setdefault(self.table, []).extend(rows)
         return self

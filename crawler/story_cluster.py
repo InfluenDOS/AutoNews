@@ -199,27 +199,37 @@ def _load_articles(sb: Any, ids: list[str]) -> list[dict[str, Any]]:
 
 
 def _load_existing_pairs(sb: Any, ids: list[str]) -> set[tuple[str, str]]:
+    # Page through every stored verdict: pairs missing here are re-sent to the model
+    # and rewritten each crawl (a single capped read used to miss most of them).
     keys: set[tuple[str, str]] = set()
     uniq = [i for i in dict.fromkeys(ids) if i]
-    if not uniq:
-        return keys
-    try:
-        rows = (
-            sb.table("article_story_pairs")
-            .select("article_lo, article_hi")
-            .or_(f"article_lo.in.({','.join(uniq)}),article_hi.in.({','.join(uniq)})")
-            .limit(2000)
-            .execute()
-            .data
-            or []
-        )
-    except Exception as exc:  # noqa: BLE001
-        print(f"story_cluster load pairs failed: {exc}")
-        return keys
-    for row in rows:
-        lo, hi = row.get("article_lo"), row.get("article_hi")
-        if lo and hi:
-            keys.add(pair_key(str(lo), str(hi)))
+    page_size = 1000
+    for i in range(0, len(uniq), 100):
+        chunk = ",".join(uniq[i : i + 100])
+        offset = 0
+        while True:
+            try:
+                rows = (
+                    sb.table("article_story_pairs")
+                    .select("article_lo, article_hi")
+                    .or_(f"article_lo.in.({chunk}),article_hi.in.({chunk})")
+                    .order("article_lo")
+                    .order("article_hi")
+                    .range(offset, offset + page_size - 1)
+                    .execute()
+                    .data
+                    or []
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"story_cluster load pairs failed: {exc}")
+                break
+            for row in rows:
+                lo, hi = row.get("article_lo"), row.get("article_hi")
+                if lo and hi:
+                    keys.add(pair_key(str(lo), str(hi)))
+            if len(rows) < page_size:
+                break
+            offset += page_size
     return keys
 
 
