@@ -11,6 +11,7 @@ from postgrest.types import ReturnMethod
 from ai_client import ai_configured, chat_json
 from crawl import get_supabase
 from jobs import job_title, mark_jobs, phrase_label
+from sources import PREVIEW_SOURCE_NAMES
 from story_cluster import cluster_stories
 from normalize import (
     clean_exclude_terms,
@@ -564,9 +565,12 @@ def translate_articles(
     fresh_rows = list(fresh_hits)
     if force or len(fresh_rows) < limit:
         try:
+            # Guest-preview rows only: rejected keyword candidates are kept (for
+            # their cached verdicts) and must never be sent for rewriting.
             q = (
                 sb.table("articles")
                 .select(columns)
+                .in_("source", sorted(PREVIEW_SOURCE_NAMES))
                 .order("published_at", desc=True)
                 .limit(limit)
             )

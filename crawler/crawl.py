@@ -250,9 +250,13 @@ def cleanup_unmatched_batch(
     *,
     keep_ids: set[str] | None = None,
 ) -> int:
-    """Remove only this-run candidates that never became a hit (and are not starred/preview).
+    """Slim this-run candidates that never became a hit (and are not starred/preview).
 
-    Historical matches stay forever: we do not scan/delete the whole articles table.
+    The rows are kept, not deleted: article_keyword_relevance cascades on article
+    delete, so deleting a rejected candidate threw its verdict away and the model
+    re-judged the same article on every crawl while it stayed in the RSS feed
+    (~9 in 10 relevance calls). Only the heavy text is cleared; the retention job
+    removes the rows once they age out.
     """
     if not batch_ids:
         return 0
@@ -282,11 +286,13 @@ def cleanup_unmatched_batch(
             if (r.get("source") or "") in PREVIEW_SOURCE_NAMES
         }
 
-    to_delete = [aid for aid in batch_ids if aid not in keep]
-    for i in range(0, len(to_delete), 100):
-        chunk = to_delete[i : i + 100]
-        sb.table("articles").delete().in_("id", chunk).execute()
-    return len(to_delete)
+    to_slim = [aid for aid in batch_ids if aid not in keep]
+    for i in range(0, len(to_slim), 100):
+        chunk = to_slim[i : i + 100]
+        sb.table("articles").update(
+            {"body": "", "raw_text_normalized": ""}, returning=ReturnMethod.minimal
+        ).in_("id", chunk).execute()
+    return len(to_slim)
 
 
 def crawl() -> None:
@@ -455,11 +461,11 @@ def crawl() -> None:
         retracted, dropped_stale = retract_stale_feed(sb, user_keywords)
     else:
         print(f"Retract: skipped (runs during {RETRACT_HOUR_UTC:02d}:00 UTC)")
-    # Only prune this-run keyword candidates that never became hits.
-    # Matched articles (hits) are permanent user feed content — never wiped on crawl.
+    # Slim (not delete) this-run candidates that never became hits, so their
+    # verdicts stay cached. Matched articles (hits) are kept in full.
     candidate_ids = {id_by_url[u] for u in (a["url"] for a in candidates) if u in id_by_url}
     preview_ids = {id_by_url[u] for u in (a["url"] for a in preview_only) if u in id_by_url}
-    removed = cleanup_unmatched_batch(sb, candidate_ids, keep_ids=preview_ids)
+    slimmed = cleanup_unmatched_batch(sb, candidate_ids, keep_ids=preview_ids)
 
     # Sample matched article titles for the UI accordion
     sample_items: list[dict[str, str]] = []
@@ -515,7 +521,7 @@ def crawl() -> None:
         )
     print(
         f"Scanned {scanned} · candidate articles {len(candidates)} · preview kept {len(preview_only)} · "
-        f"upserted {count} · hits merged {inserted} · pruned unmatched {removed} · "
+        f"upserted {count} · hits merged {inserted} · unmatched slimmed {slimmed} · "
         f"retracted {retracted} · stale hits dropped {dropped_stale}"
     )
 
