@@ -161,7 +161,13 @@ def matching_keyword_rows(
 
 
 def upsert_articles(sb: Client, articles: list[dict[str, Any]]) -> int:
-    """Store articles, dropping `body` when migration 014 has not been applied yet."""
+    """Store articles, dropping `body` when migration 014 has not been applied yet.
+
+    Rows with and without a fetched body are written in separate requests. A bulk
+    upsert sends the union of all row keys, so a body-less row mixed into a batch
+    would send body=NULL and fail the NOT NULL constraint; a batch that omits the
+    column entirely also leaves any body already stored for that URL untouched.
+    """
     if not articles:
         return 0
 
@@ -173,11 +179,14 @@ def upsert_articles(sb: Client, articles: list[dict[str, Any]]) -> int:
             total += len(result.data or chunk)
         return total
 
+    with_body = [a for a in articles if a.get("body")]
+    without_body = [{k: v for k, v in a.items() if k != "body"} for a in articles if not a.get("body")]
+    total = write(without_body)
     try:
-        return write(articles)
+        return total + write(with_body)
     except Exception as exc:  # noqa: BLE001
         print(f"article upsert with body failed ({exc}); retrying without body")
-        return write([{k: v for k, v in a.items() if k != "body"} for a in articles])
+        return total + write([{k: v for k, v in a.items() if k != "body"} for a in with_body])
 
 
 def resolve_article_ids(sb: Client, urls: list[str]) -> dict[str, str]:
