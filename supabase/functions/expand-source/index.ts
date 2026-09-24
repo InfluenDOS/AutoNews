@@ -144,12 +144,15 @@ function catalogHits(phrase: string): Feed[] {
   return out.slice(0, 12)
 }
 
+const FETCH_HEADERS = { 'User-Agent': 'AutoNewsBot/1.0 (+https://github.com/InfluenDOS/AutoNews)' }
+
 async function looksLikeFeed(url: string): Promise<boolean> {
   try {
     const resp = await fetch(url, {
       method: 'GET',
       redirect: 'follow',
-      headers: { 'User-Agent': 'AutoNewsBot/1.0 (+https://github.com/InfluenDOS/AutoNews)' },
+      headers: FETCH_HEADERS,
+      signal: AbortSignal.timeout(15_000),
     })
     if (!resp.ok) return false
     const text = (await resp.text()).slice(0, 8000)
@@ -157,6 +160,83 @@ async function looksLikeFeed(url: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+const COMMON_FEED_PATHS = ['/feed', '/rss', '/rss.xml', '/feed.xml', '/index.xml', '/rss/']
+
+// People usually paste a site address (theguardian.com), not its feed URL. Try the
+// address itself, then feeds the homepage advertises via <link rel="alternate">,
+// then common feed paths; the first one that parses as RSS/Atom wins.
+async function discoverSiteFeed(url: string): Promise<string | null> {
+  if (await looksLikeFeed(url)) return url
+  const candidates: string[] = []
+  try {
+    const resp = await fetch(url, {
+      redirect: 'follow',
+      headers: FETCH_HEADERS,
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (resp.ok) {
+      const html = (await resp.text()).slice(0, 200_000)
+      for (const tag of html.match(/<link\b[^>]*>/gi) ?? []) {
+        if (!/rel=["']?alternate/i.test(tag)) continue
+        if (!/type=["']?application\/(rss|atom)\+xml/i.test(tag)) continue
+        const href = tag.match(/href=["']([^"']+)/i)?.[1]
+        if (href) candidates.push(new URL(href, resp.url || url).toString())
+      }
+    }
+  } catch {
+    /* fall through to common paths */
+  }
+  const origin = new URL(url).origin
+  candidates.push(...COMMON_FEED_PATHS.map((p) => origin + p))
+  for (const candidate of [...new Set(candidates)]) {
+    if (await looksLikeFeed(candidate)) return candidate
+  }
+  return null
+}
+
+// Keep in sync with crawler/sources.py. The crawler attributes and gates articles by
+// source name and ignores a custom feed that reuses a built-in name for another URL,
+// so rename such feeds here to keep them usable.
+const BUILTIN_FEED_URLS: Record<string, string> = {
+  blic: 'https://www.blic.rs/rss/vesti',
+  'blic politika': 'https://www.blic.rs/rss/vesti/politika',
+  b92: 'https://www.b92.net/info/rss/vesti.xml',
+  rts: 'https://www.rts.rs/page/stories/ci/rss.html',
+  novosti: 'https://www.novosti.rs/rss/vesti',
+  'n1 serbia': 'https://n1info.rs/feed/',
+  danas: 'https://www.danas.rs/feed/',
+  'balkan insight': 'https://balkaninsight.com/feed/',
+  'blic kultura': 'https://www.blic.rs/rss/kultura',
+  'blic zabava': 'https://www.blic.rs/rss/zabava',
+  'b92 kultura': 'https://www.b92.net/info/rss/kultura.xml',
+  'novosti kultura': 'https://www.novosti.rs/rss/kultura',
+  variety: 'https://variety.com/feed/',
+}
+
+function withDistinctName(feed: Feed): Feed {
+  const builtinUrl = BUILTIN_FEED_URLS[feed.name.toLowerCase()]
+  if (!builtinUrl || builtinUrl === feed.url) return feed
+  const host = new URL(feed.url).hostname.replace(/^www\./, '')
+  return { ...feed, name: `${feed.name} (${host})`.slice(0, 80) }
+}
+
+const EXPAND_PER_HOUR = 30
+
+// Every call spends an AI request and outbound fetches; cap it per user.
+async function overHourlyLimit(
+  admin: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<boolean> {
+  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+  const { count } = await admin
+    .from('user_jobs')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('step', 'expand')
+    .gte('created_at', since)
+  return (count ?? 0) >= EXPAND_PER_HOUR
 }
 
 function parseFeeds(raw: unknown): Feed[] {
@@ -265,6 +345,13 @@ Deno.serve(async (req) => {
       })
     }
 
+    if (await overHourlyLimit(admin, user.id)) {
+      return new Response(JSON.stringify({ error: 'rate_limited' }), {
+        status: 429,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
     const jobId = await createJob(admin, user.id, `解析抓取源「${row.label}」`)
 
     try {
@@ -273,7 +360,19 @@ Deno.serve(async (req) => {
         const url = normalizeUrl(String(row.rss_url || row.label || ''))
         if (!url) throw new Error('无效的 RSS 地址')
         const host = new URL(url).hostname.replace(/^www\./, '')
-        candidates = [{ name: String(row.label || host).slice(0, 80), url, country: 'REG' }]
+        const name = String(row.label || host).slice(0, 80)
+        const feedUrl = await discoverSiteFeed(url)
+        if (feedUrl) {
+          candidates = [{ name, url: feedUrl, country: 'REG' }]
+        } else {
+          // Some sites publish feeds on another host (bbc.com → feeds.bbci.co.uk)
+          // or block plain fetches of their homepage; ask the model, then validate.
+          const raw = await chatJson(
+            EXPAND_SYSTEM,
+            `用户输入的网站：${url}\n这个地址本身不是 RSS。只给出这家媒体自己的公开 RSS/Atom 订阅地址，最多 3 条。`,
+          )
+          candidates = parseFeeds(raw.feeds).slice(0, 3)
+        }
       } else {
         const phrase = String(row.label || '').trim()
         candidates = catalogHits(phrase)
@@ -296,7 +395,7 @@ Deno.serve(async (req) => {
         deduped.push(f)
       }
 
-      const valid = await validateFeeds(deduped)
+      const valid = (await validateFeeds(deduped)).map(withDistinctName)
       if (!valid.length) {
         await admin
           .from('user_source_bundles')

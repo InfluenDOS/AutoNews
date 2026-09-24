@@ -211,6 +211,23 @@ async function updateJob(
     .eq('id', id)
 }
 
+const EXPAND_PER_HOUR = 30
+
+// Each call can spend an AI request and dispatch a crawl; cap it per user.
+async function overHourlyLimit(
+  admin: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<boolean> {
+  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+  const { count } = await admin
+    .from('user_jobs')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('step', 'expand')
+    .gte('created_at', since)
+  return (count ?? 0) >= EXPAND_PER_HOUR
+}
+
 async function maybeTriggerCrawl(
   admin: ReturnType<typeof createClient>,
   userId: string,
@@ -337,6 +354,13 @@ Deno.serve(async (req) => {
     if (row.user_id !== user.id) {
       return new Response(JSON.stringify({ error: 'forbidden' }), {
         status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    if (await overHourlyLimit(admin, user.id)) {
+      return new Response(JSON.stringify({ error: 'rate_limited' }), {
+        status: 429,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
