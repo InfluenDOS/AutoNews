@@ -95,7 +95,9 @@ export function SourcesProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user || !bundles.some((b) => b.status === 'pending')) return
-    const id = window.setInterval(() => void refresh({ quiet: true }), 3_000)
+    const id = window.setInterval(() => {
+      if (!document.hidden) void refresh({ quiet: true })
+    }, 3_000)
     return () => window.clearInterval(id)
   }, [user, bundles, refresh])
 

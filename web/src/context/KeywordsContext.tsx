@@ -61,7 +61,9 @@ export function KeywordsProvider({ children }: { children: ReactNode }) {
   // Poll faster while AI expand is pending
   useEffect(() => {
     if (!user || !keywords.some(isAiPending)) return
-    const id = window.setInterval(() => void refresh({ quiet: true }), 3_000)
+    const id = window.setInterval(() => {
+      if (!document.hidden) void refresh({ quiet: true })
+    }, 3_000)
     return () => window.clearInterval(id)
   }, [user, keywords, refresh])
 

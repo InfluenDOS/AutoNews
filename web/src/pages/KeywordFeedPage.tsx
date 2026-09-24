@@ -475,15 +475,26 @@ export function KeywordFeedPage({ all = false }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload on feed identity / page
   }, [user?.id, readyKey, all, keywordId, page])
 
+  // Background refreshes pause while the tab is hidden and catch up on return.
   useEffect(() => {
-    const id = window.setInterval(() => void load('silent'), REFRESH_MS)
-    return () => window.clearInterval(id)
+    const id = window.setInterval(() => {
+      if (!document.hidden) void load('silent')
+    }, REFRESH_MS)
+    const onVisible = () => {
+      if (!document.hidden) void load('silent')
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, readyKey, page])
 
   useEffect(() => {
     if (!aiPending && !hasActive) return
     const id = window.setInterval(() => {
+      if (document.hidden) return
       void refresh({ quiet: true })
       void load('silent')
     }, 8_000)

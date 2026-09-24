@@ -86,13 +86,33 @@ export function JobsProvider({ children }: { children: ReactNode }) {
     [jobs],
   )
 
+  // Realtime pushes job changes; polling is only a fallback while a job is in
+  // flight or finished within RECENT_DONE_MS (the banner still shows it). Each poll
+  // is ~100 KB, so polling for as long as any job had *ever* finished used to cost
+  // over 1 GB of database egress per day for a single open tab.
   useEffect(() => {
-    if (!hasActive && jobs.every((j) => j.status !== 'done' && j.status !== 'error')) return
+    const finishedAt = jobs
+      .filter((j) => j.status === 'done' || j.status === 'error')
+      .map((j) => Date.parse(j.updated_at || j.created_at) || 0)
+    const pollUntil = Math.max(0, ...finishedAt) + RECENT_DONE_MS
+    if (!hasActive && Date.now() > pollUntil) return
     const id = window.setInterval(() => {
-      void refreshJobs()
+      if (!hasActive && Date.now() > pollUntil) {
+        window.clearInterval(id)
+        return
+      }
+      if (!document.hidden) void refreshJobs()
     }, hasActive ? 2500 : 5000)
     return () => window.clearInterval(id)
   }, [hasActive, jobs, refreshJobs])
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (!document.hidden) void refreshJobs()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [refreshJobs])
 
   const actions = useMemo(() => ({ refreshJobs }), [refreshJobs])
   const status = useMemo(() => ({ hasActive }), [hasActive])
