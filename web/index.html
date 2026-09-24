@@ -14,16 +14,29 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@500;600;700;900&display=swap"
       rel="stylesheet"
     />
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
     <meta name="theme-color" content="#f4f1ea" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#14130f" media="(prefers-color-scheme: dark)" />
     <title>AutoNews · 关键词新闻</title>
     <script>
-      // Apply the saved light/dark choice before first paint (see ThemeContext).
+      // Apply the saved style and light/dark choice before first paint (see ThemeContext).
       (function () {
+        var root = document.documentElement
         try {
           var mode = localStorage.getItem('autonews-theme-v3')
-          if (mode === 'light' || mode === 'dark') document.documentElement.dataset.theme = mode
-        } catch (e) {}
+          if (mode === 'light' || mode === 'dark') root.dataset.theme = mode
+          var skin = localStorage.getItem('autonews-skin-v3')
+          root.dataset.skin = skin === 'bamboo' ? 'bamboo' : 'wire'
+          if (skin === 'bamboo') {
+            var link = document.createElement('link')
+            link.rel = 'stylesheet'
+            link.href = 'https://cdn.jsdelivr.net/npm/lxgw-wenkai-screen-webfont@1.7.0/lxgwwenkaigbscreen.css'
+            link.setAttribute('data-skin-font', 'bamboo')
+            document.head.appendChild(link)
+          }
+        } catch (e) {
+          root.dataset.skin = 'wire'
+        }
       })()
     </script>
   </head>
