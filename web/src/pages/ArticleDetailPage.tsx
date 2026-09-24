@@ -1,20 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { fullStamp } from '../lib/dates'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Article } from '../types'
 
-function formatDate(value: string | null) {
-  if (!value) return '时间未知'
-  try {
-    return new Intl.DateTimeFormat('zh-CN', {
-      dateStyle: 'full',
-      timeStyle: 'short',
-    }).format(new Date(value))
-  } catch {
-    return value
-  }
-}
+// The reader never shows `body` (source text) or `raw_text_normalized`; skip them.
+const READER_COLUMNS =
+  'id, source, title, summary, title_zh, summary_zh, lead_zh, body_zh, url, published_at, created_at'
 
 function readingMinutes(text: string) {
   const chars = text.replace(/\s/g, '').length
@@ -37,7 +30,7 @@ export function ArticleDetailPage() {
     }
     setLoading(true)
     setError(null)
-    const { data, error: err } = await supabase.from('articles').select('*').eq('id', id).maybeSingle()
+    const { data, error: err } = await supabase.from('articles').select(READER_COLUMNS).eq('id', id).maybeSingle()
     if (err) {
       setError(err.message)
       setArticle(null)
@@ -84,6 +77,13 @@ export function ArticleDetailPage() {
     }
   }
 
+  function goBack() {
+    // HashRouter keeps an index in history.state; go back only within the app.
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0
+    if (idx > 0) navigate(-1)
+    else navigate('/')
+  }
+
   const title = useMemo(
     () => ((article?.title_zh || '').trim() || article?.title || ''),
     [article],
@@ -102,7 +102,7 @@ export function ArticleDetailPage() {
   if (loading) {
     return (
       <article className="reader">
-        <p className="muted">正在打开报道…</p>
+        <p className="loading-line">正在打开报道…</p>
       </article>
     )
   }
@@ -110,53 +110,52 @@ export function ArticleDetailPage() {
   if (!article) {
     return (
       <article className="reader">
-        <p className="error">{error || '未找到这篇新闻。'}</p>
-        <Link to="/" className="btn btn-sm btn-outline">
-          返回列表
+        <p className="notice notice-error">{error || '未找到这篇新闻。'}</p>
+        <Link to="/" className="btn btn-outline">
+          返回首页
         </Link>
       </article>
     )
   }
 
   const translated = Boolean((article.title_zh || '').trim())
+  const when = article.published_at ?? article.created_at
 
   return (
     <article className="reader">
-      <header className="reader-header">
-        <div className="reader-nav">
-          <Link to="/" className="linkish">
-            ← 返回列表
-          </Link>
-          <button
-            type="button"
-            className={`star-btn wide ${starred ? 'on' : ''}`}
-            onClick={() => {
-              if (!user) {
-                navigate('/auth')
-                return
-              }
-              void toggleStar()
-            }}
-            title={user ? undefined : '登录后即可收藏'}
-          >
-            {starred ? '★ 已收藏' : '☆ 收藏'}
-          </button>
-        </div>
+      <nav className="reader-nav">
+        <button type="button" className="back-link" onClick={goBack}>
+          ← 返回
+        </button>
+        <button
+          type="button"
+          className={`star star-labeled${starred ? ' is-on' : ''}`}
+          aria-pressed={user ? starred : undefined}
+          onClick={() => {
+            if (!user) {
+              navigate('/auth')
+              return
+            }
+            void toggleStar()
+          }}
+          title={user ? undefined : '登录后即可收藏'}
+        >
+          {starred ? '★ 已收藏' : '☆ 收藏'}
+        </button>
+      </nav>
 
-        <div className="reader-kicker">
-          <span className="source">{article.source}</span>
-          <span className="dot">·</span>
-          <time dateTime={article.published_at ?? undefined}>{formatDate(article.published_at)}</time>
-          <span className="dot">·</span>
-          <span>约 {readingMinutes(lead + bodyText)} 分钟阅读</span>
-        </div>
-
+      <header className="reader-head">
+        <p className="kicker">
+          <span className="reader-source">{article.source}</span>
+          <span aria-hidden> · </span>
+          <time dateTime={when ?? undefined}>{fullStamp(when)}</time>
+          <span aria-hidden> · </span>
+          <span>约 {readingMinutes(lead + bodyText)} 分钟</span>
+        </p>
         <h1 className="reader-title">{title}</h1>
-
         {lead ? <p className="reader-lead">{lead}</p> : null}
-
         {!translated && (
-          <p className="card-hint">中文改写尚未完成，正文可能仍接近原文摘要。</p>
+          <p className="notice">中文改写尚未完成，正文可能仍接近原文摘要。</p>
         )}
       </header>
 
@@ -167,22 +166,21 @@ export function ArticleDetailPage() {
       </div>
 
       {article.title && article.title !== title && (
-        <p className="reader-original-title">原标题：{article.title}</p>
+        <p className="reader-original">
+          <span className="kicker">原标题</span>
+          {article.title}
+        </p>
       )}
 
-      {error && <p className="error">{error}</p>}
+      {error && <p className="notice notice-error">{error}</p>}
 
-      <footer className="reader-footer">
-        <div className="origin-card">
-          <h2>原文出处</h2>
-          <p>
-            本页为根据公开 RSS 标题与摘要改写的中文阅读版，并非媒体全文转载。
-            完整报道与图片请打开原站。
-          </p>
-          <a className="btn btn-solid" href={article.url} target="_blank" rel="noopener noreferrer">
-            打开原文 · {article.source}
-          </a>
-        </div>
+      <footer className="reader-origin">
+        <p>
+          本页是根据原报道改写的中文阅读版，并非全文转载。完整报道与图片请看原站。
+        </p>
+        <a className="btn btn-solid" href={article.url} target="_blank" rel="noopener noreferrer">
+          阅读原文 · {article.source} ↗
+        </a>
       </footer>
     </article>
   )

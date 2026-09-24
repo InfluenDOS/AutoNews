@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { BrandLogo } from '../components/BrandLogo'
 import { IconEye, IconEyeOff } from '../components/NavIcons'
 import { TURNSTILE_SITE_KEY, Turnstile, type TurnstileHandle } from '../components/Turnstile'
 
@@ -119,10 +120,34 @@ export function AuthPage() {
   const isSignIn = mode === 'signin'
 
   return (
-    <div className="auth-wrap" key={enterKey}>
-      <section className="panel auth-card">
-        <h1 className="page-title">{isSignIn ? '登录' : '注册账号'}</h1>
-        <p className="page-sub">保存关键词、筛选相关新闻，并把感兴趣的文章加入收藏夹。</p>
+    <div className="auth" key={enterKey}>
+      <section className="auth-poster" aria-label="AutoNews 简介">
+        <BrandLogo className="seal-lg" />
+        <p className="kicker">AutoNews · 中文电讯</p>
+        <p className="auth-poster-title">
+          用中文写下关心的事，
+          <br />
+          每小时收到塞尔维亚的相关报道。
+        </p>
+        <ol className="auth-steps">
+          <li>
+            <b>写下关键词</b>
+            <span>一句中文就行，比如「塞尔维亚大选」</span>
+          </li>
+          <li>
+            <b>AI 挑出相关报道</b>
+            <span>从 Blic、N1、RTS 等主流媒体里读全文判断</span>
+          </li>
+          <li>
+            <b>改写成中文短讯</b>
+            <span>按时间排好，值得留的可以收藏</span>
+          </li>
+        </ol>
+      </section>
+
+      <section className="auth-panel">
+        <h1 className="auth-title">{isSignIn ? '登录' : '注册账号'}</h1>
+        <p className="auth-sub">{isSignIn ? '欢迎回来。' : '注册后需要点一下邮件里的确认链接。'}</p>
 
         <form className="form" onSubmit={onSubmit}>
           <label>

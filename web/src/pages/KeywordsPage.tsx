@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArticleCard } from '../components/ArticleCard'
+import { PageHead } from '../components/PageHead'
 import { useAuth } from '../context/AuthContext'
 import { ARTICLE_LIST_COLUMNS, isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Article } from '../types'
@@ -154,36 +155,34 @@ function GuestKeywordsPreview() {
   }, [])
 
   return (
-    <div className="keywords-guest">
-      <section className="panel auth-card">
-        <h1 className="page-title">关键词</h1>
-        <p className="page-sub">
-          请先 <Link className="auth-switch" to="/auth">登录</Link> 后再管理关键词。
-        </p>
-      </section>
+    <div className="feed">
+      <PageHead
+        kicker="试读"
+        title="随便看看"
+        lead="AutoNews 按你用中文写下的关键词，从塞尔维亚主流媒体里挑出相关报道，改写成中文短讯。登录后即可订阅，这里先看几条影视新闻。"
+        actions={
+          <Link className="btn btn-solid" to="/auth">
+            登录 / 注册
+          </Link>
+        }
+      />
 
-      <section className="panel glass-panel keywords-guest-feed">
-        <div className="panel-head keywords-guest-head">
-          <div>
-            <h2>随便看看 · 电影</h2>
-            <p className="panel-sub">登录后可按自己的关键词订阅。</p>
-          </div>
+      {loading ? (
+        <p className="loading-line">加载中…</p>
+      ) : error ? (
+        <p className="notice notice-error">{error}</p>
+      ) : articles.length === 0 ? (
+        <div className="empty">
+          <p className="empty-title">暂时没有预览</p>
+          <p>稍等爬虫更新后再来看看。</p>
         </div>
-
-        {loading ? (
-          <p className="muted">加载中…</p>
-        ) : error ? (
-          <p className="error">{error}</p>
-        ) : articles.length === 0 ? (
-          <p className="muted">暂时还没有电影相关预览，稍等爬虫更新后再来看看。</p>
-        ) : (
-          <div className="story-list">
-            {articles.map((article) => (
-              <ArticleCard key={article.id} article={article} starred={false} canStar={false} />
-            ))}
-          </div>
-        )}
-      </section>
+      ) : (
+        <div className="timeline">
+          {articles.map((article) => (
+            <ArticleCard key={article.id} article={article} starred={false} canStar={false} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

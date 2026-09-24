@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArticleCard } from '../components/ArticleCard'
 import { FeedPager } from '../components/FeedPager'
-import { WorkspaceMasthead } from '../components/WorkspaceMasthead'
+import { PageHead } from '../components/PageHead'
 import { useAuth } from '../context/AuthContext'
 import { usePageParam } from '../hooks/usePageParam'
 import { reuseArticleList } from '../lib/listSnapshot'
@@ -108,92 +108,62 @@ export function StarsPage() {
 
   if (!user) {
     return (
-      <div className="feed-workspace feed-workspace-single">
-        <WorkspaceMasthead />
-        <div className="feed-primary">
-          <section className="hero">
-            <div className="hero-copy">
-              <p className="eyebrow">Favorites</p>
-              <h1>收藏夹</h1>
-              <p className="hero-lead">集中查看你收藏的新闻，点击标题阅读详情。</p>
-              <p className="hero-updated">
-                请先 <Link className="auth-switch" to="/auth">登录</Link> 查看收藏内容。
-              </p>
-            </div>
-            <div className="hero-window" aria-hidden="true" />
-          </section>
-
-          <section className="glass-panel feed">
-            <div className="panel-head">
-              <h2>收藏内容</h2>
-              <span className="muted">尚未登录</span>
-            </div>
-            <div className="empty">
-              <p>登录后即可查看已收藏的新闻。</p>
-            </div>
-          </section>
+      <div className="feed">
+        <PageHead kicker="收藏" title="收藏夹" lead="把值得留存的报道收进来，随时回看。" />
+        <div className="empty">
+          <p className="empty-title">登录后查看收藏</p>
+          <p>
+            <Link to="/auth">登录</Link> 后，在任意新闻旁点 ☆ 即可收藏。
+          </p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="feed-workspace feed-workspace-single">
-      <WorkspaceMasthead />
-      <div className="feed-primary">
-        <section className="hero">
-          <div className="hero-copy">
-            <p className="eyebrow">Favorites</p>
-            <h1>收藏夹</h1>
-            <p className="hero-lead">集中查看你收藏的新闻，点击标题阅读详情，点星标可取消收藏。</p>
-            <p className="hero-updated">
-              {loading
-                ? '收藏内容加载中…'
-                : totalPages > 1
-                  ? `已收藏 ${total} 条 · 第 ${page} / ${totalPages} 页`
-                  : `已收藏 ${total} 条`}
-            </p>
-          </div>
-          <div className="hero-window" aria-hidden="true" />
-        </section>
+    <div className="feed">
+      <PageHead
+        kicker="收藏"
+        title="收藏夹"
+        lead="你收藏的报道。再点一次 ★ 可取消收藏。"
+        meta={
+          <span>
+            {loading
+              ? '加载中…'
+              : totalPages > 1
+                ? `共 ${total} 条 · 第 ${page} / ${totalPages} 页`
+                : `共 ${total} 条`}
+          </span>
+        }
+      />
 
-        <section className="glass-panel feed">
-          <div className="panel-head">
-            <h2>收藏内容</h2>
-            <span className="muted">
-              {loading ? '加载中' : totalPages > 1 ? `第 ${page} / ${totalPages} 页` : `${total} 条`}
-            </span>
+      {error && <p className="notice notice-error">{error}</p>}
+      {loading ? (
+        <p className="loading-line">正在加载收藏…</p>
+      ) : articles.length === 0 ? (
+        <div className="empty">
+          <p className="empty-title">还没有收藏</p>
+          <p>
+            打开 <Link to="/">新闻</Link>，点 ☆ 即可加入收藏夹。
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="timeline">
+            {storyGroups.map(({ article, alts }) => (
+              <ArticleCard
+                key={article.id}
+                article={article}
+                altSources={alts.map((alt) => ({ source: alt.source, url: alt.url }))}
+                starred
+                canStar
+                onToggleStar={unstar}
+              />
+            ))}
           </div>
-
-          {error && <p className="error">{error}</p>}
-          {loading ? (
-            <p className="muted">正在加载收藏内容…</p>
-          ) : articles.length === 0 ? (
-            <div className="empty">
-              <p>还没有收藏。</p>
-              <p className="muted">
-                打开 <Link to="/">新闻</Link>，点击 ★ 即可加入收藏夹。
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="story-list">
-                {storyGroups.map(({ article, alts }) => (
-                  <ArticleCard
-                    key={article.id}
-                    article={article}
-                    altSources={alts.map((alt) => ({ source: alt.source, url: alt.url }))}
-                    starred
-                    canStar
-                    onToggleStar={unstar}
-                  />
-                ))}
-              </div>
-              <FeedPager page={page} totalPages={totalPages} disabled={loading} onChange={setPage} />
-            </>
-          )}
-        </section>
-      </div>
+          <FeedPager page={page} totalPages={totalPages} disabled={loading} onChange={setPage} />
+        </>
+      )}
     </div>
   )
 }

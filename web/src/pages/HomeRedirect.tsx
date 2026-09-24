@@ -6,7 +6,7 @@ export function HomeRedirect() {
   const { user, loading: authLoading } = useAuth()
 
   if (authLoading) {
-    return <p className="muted">加载中…</p>
+    return <p className="loading-line">加载中…</p>
   }
 
   if (!user) {

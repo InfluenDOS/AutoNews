@@ -2,75 +2,68 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react'
 
-export const SKIN_STORAGE_KEY = 'autonews-skin-v2'
+/** Keep in sync with the inline script in index.html. */
+export const THEME_STORAGE_KEY = 'autonews-theme-v3'
 
-export const SKINS = [
-  { id: 'jimo', label: '即墨' },
-  { id: 'forest', label: '点翠' },
-  { id: 'canhong', label: '残红' },
-  { id: 'yuerugou', label: '月如钩' },
+export const THEME_MODES = [
+  { id: 'auto', label: '自动' },
+  { id: 'light', label: '日间' },
+  { id: 'dark', label: '夜间' },
 ] as const
 
-export type SkinId = (typeof SKINS)[number]['id']
-
-export type Skin = (typeof SKINS)[number]
-
-const DEFAULT_SKIN: SkinId = 'forest'
+export type ThemeMode = (typeof THEME_MODES)[number]['id']
 
 type ThemeContextValue = {
-  skin: SkinId
-  skins: readonly Skin[]
-  setSkin: (id: SkinId) => void
+  mode: ThemeMode
+  setMode: (mode: ThemeMode) => void
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null)
 
-function isSkinId(value: string | null): value is SkinId {
-  return SKINS.some((s) => s.id === value)
+function isThemeMode(value: string | null): value is ThemeMode {
+  return THEME_MODES.some((m) => m.id === value)
 }
 
-function readStoredSkin(): SkinId {
+function readStoredMode(): ThemeMode {
   try {
-    const stored = localStorage.getItem(SKIN_STORAGE_KEY)
-    if (stored === 'canhong') return 'canhong'
-    if (isSkinId(stored)) return 'forest'
+    const stored = localStorage.getItem(THEME_STORAGE_KEY)
+    if (isThemeMode(stored)) return stored
   } catch {
     /* ignore */
   }
-  return DEFAULT_SKIN
+  return 'auto'
 }
 
-function applySkin(id: SkinId) {
-  document.documentElement.dataset.theme = id === 'forest' ? 'jimo' : id
+/** `auto` leaves data-theme unset so the prefers-color-scheme tokens apply. */
+function applyMode(mode: ThemeMode) {
+  const root = document.documentElement
+  if (mode === 'auto') delete root.dataset.theme
+  else root.dataset.theme = mode
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [skin, setSkinState] = useState<SkinId>(() => {
-    const id = readStoredSkin()
-    applySkin(id)
-    return id
-  })
+  const [mode, setModeState] = useState<ThemeMode>(readStoredMode)
 
-  const setSkin = useCallback((id: SkinId) => {
-    if (!isSkinId(id)) return
-    applySkin(id)
-    setSkinState(id)
+  useEffect(() => {
+    applyMode(mode)
+  }, [mode])
+
+  const setMode = useCallback((next: ThemeMode) => {
+    setModeState(next)
     try {
-      localStorage.setItem(SKIN_STORAGE_KEY, id)
+      localStorage.setItem(THEME_STORAGE_KEY, next)
     } catch {
       /* ignore */
     }
   }, [])
 
-  const value = useMemo(
-    () => ({ skin, skins: SKINS, setSkin }),
-    [skin, setSkin],
-  )
+  const value = useMemo(() => ({ mode, setMode }), [mode, setMode])
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }

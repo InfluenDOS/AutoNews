@@ -1,18 +1,7 @@
 import { memo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { clockTime, shortStamp } from '../lib/dates'
 import type { Article } from '../types'
-
-function formatDate(value: string | null) {
-  if (!value) return '时间未知'
-  try {
-    return new Intl.DateTimeFormat('zh-CN', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }).format(new Date(value))
-  } catch {
-    return value
-  }
-}
 
 type Props = {
   article: Article
@@ -21,8 +10,11 @@ type Props = {
   altSources?: { source: string; url: string }[]
   onToggleStar?: (articleId: string) => void
   canStar: boolean
+  /** `time` inside a day-grouped timeline, `date` in lists that are not grouped by day. */
+  stamp?: 'time' | 'date'
 }
 
+/** One news item in the dispatch timeline. */
 export const ArticleCard = memo(function ArticleCard({
   article,
   starred,
@@ -30,60 +22,40 @@ export const ArticleCard = memo(function ArticleCard({
   altSources,
   onToggleStar,
   canStar,
+  stamp = 'date',
 }: Props) {
   const navigate = useNavigate()
   const [altsOpen, setAltsOpen] = useState(false)
   const title = (article.title_zh || '').trim() || article.title
   const summary = (article.summary_zh || '').trim() || article.summary
-  const preview = summary.length > 110 ? `${summary.slice(0, 110).trim()}…` : summary
   const translated = Boolean((article.title_zh || '').trim())
   const alts = altSources ?? []
+  const when = article.published_at ?? article.created_at
+  const stampText = stamp === 'time' ? clockTime(when) : shortStamp(when)
 
   return (
-    <article className="story">
-      <div className="story-meta">
-        <span className="source">{article.source}</span>
-        <time dateTime={article.published_at ?? undefined}>{formatDate(article.published_at)}</time>
-      </div>
+    <article className={`dispatch${stamp === 'date' ? ' is-dated' : ''}`}>
+      <time className="dispatch-stamp" dateTime={when ?? undefined}>
+        {stampText}
+      </time>
 
-      <h2 className="story-title">
-        <Link to={`/article/${article.id}`}>{title}</Link>
-      </h2>
-
-      {preview && (
-        <p className="story-summary">
-          <span className="story-summary-short">{preview}</span>
-          <span className="story-summary-full">{summary}</span>
-        </p>
-      )}
-      {!translated && <p className="card-hint">等待中文改写</p>}
-
-      <div className="story-actions">
-        {matchedKeywords && matchedKeywords.length > 0 && (
-          <div className="tags">
-            {matchedKeywords.slice(0, 3).map((k) => (
-              <span key={k} className="tag">
-                {k}
-              </span>
-            ))}
-          </div>
-        )}
-        <div className="story-actions-right">
+      <div className="dispatch-body">
+        <p className="dispatch-meta" data-stamp={stampText}>
+          <span className="dispatch-source">{article.source}</span>
           {alts.length > 0 && (
             <button
               type="button"
-              className="text-link alt-sources-toggle"
+              className="dispatch-alts"
+              aria-expanded={altsOpen}
               onClick={() => setAltsOpen((v) => !v)}
             >
-              另有 {alts.length} 个来源
+              另有 {alts.length} 家报道
             </button>
           )}
-          <Link className="text-link" to={`/article/${article.id}`}>
-            阅读
-          </Link>
+          {!translated && <span className="dispatch-pending">待译</span>}
           <button
             type="button"
-            className={`star-btn ${starred ? 'on' : ''}`}
+            className={`star${starred ? ' is-on' : ''}`}
             onClick={(e) => {
               e.preventDefault()
               if (!canStar || !onToggleStar) {
@@ -92,24 +64,40 @@ export const ArticleCard = memo(function ArticleCard({
               }
               onToggleStar(article.id)
             }}
+            aria-pressed={canStar ? starred : undefined}
             aria-label={!canStar ? '登录后收藏' : starred ? '取消收藏' : '加入收藏'}
             title={!canStar ? '登录后即可收藏' : starred ? '取消收藏' : '加入收藏'}
           >
             {starred ? '★' : '☆'}
           </button>
-        </div>
+        </p>
+
+        <h3 className="dispatch-title">
+          <Link to={`/article/${article.id}`}>{title}</Link>
+        </h3>
+
+        {summary && <p className="dispatch-summary">{summary}</p>}
+
+        {altsOpen && alts.length > 0 && (
+          <ul className="dispatch-alt-list">
+            {alts.map((alt) => (
+              <li key={alt.url}>
+                <a href={alt.url} target="_blank" rel="noreferrer">
+                  {alt.source} ↗
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {matchedKeywords && matchedKeywords.length > 0 && (
+          <ul className="dispatch-tags" aria-label="匹配的关键词">
+            {matchedKeywords.slice(0, 3).map((k) => (
+              <li key={k}>#{k}</li>
+            ))}
+          </ul>
+        )}
       </div>
-      {altsOpen && alts.length > 0 && (
-        <ul className="alt-sources">
-          {alts.map((alt) => (
-            <li key={alt.url}>
-              <a href={alt.url} target="_blank" rel="noreferrer">
-                {alt.source}
-              </a>
-            </li>
-          ))}
-        </ul>
-      )}
     </article>
   )
 })

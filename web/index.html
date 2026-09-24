@@ -11,15 +11,18 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@400;500;600;700&family=Sora:wght@500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@500;600;700;900&display=swap"
       rel="stylesheet"
     />
+    <meta name="theme-color" content="#f4f1ea" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#14130f" media="(prefers-color-scheme: dark)" />
     <title>AutoNews · 关键词新闻</title>
     <script>
+      // Apply the saved light/dark choice before first paint (see ThemeContext).
       (function () {
         try {
-          var id = localStorage.getItem('autonews-skin-v2')
-          document.documentElement.dataset.theme = id === 'canhong' ? 'canhong' : 'jimo'
+          var mode = localStorage.getItem('autonews-theme-v3')
+          if (mode === 'light' || mode === 'dark') document.documentElement.dataset.theme = mode
         } catch (e) {}
       })()
     </script>

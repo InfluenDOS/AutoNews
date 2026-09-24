@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useParams } from 'react-router-dom'
 import { ArticleCard } from '../components/ArticleCard'
 import { FeedPager } from '../components/FeedPager'
-import { ProcessBanner } from '../components/ProcessBanner'
-import { WorkspaceMasthead } from '../components/WorkspaceMasthead'
+import { DispatchList } from '../components/DispatchList'
+import { PageHead } from '../components/PageHead'
 import { useAuth } from '../context/AuthContext'
 import { useJobs, useJobsRefresh, useJobsStatus } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
@@ -134,13 +134,11 @@ function AiProgressPanel({
         <li className="is-active">正在扩展检索词（通常约 3～5 秒）…</li>
         <li className={readyCount > 0 ? 'is-done' : ''}>
           {readyCount > 0
-            ? `已有 ${readyCount} 个词就绪，抓取约 1～3 分钟后出新闻`
+            ? `已有 ${readyCount} 个词就绪，几分钟后出新闻`
             : '扩展完成后会自动抓取匹配新闻'}
         </li>
       </ol>
-      <p className="muted ai-progress-hint">
-        「扩展」很快；之后的「抓取」是后台 Actions，整点任务不受影响。
-      </p>
+      <p className="ai-progress-hint">检索词扩展只需几秒；随后的抓取在后台进行，通常几分钟内出结果。</p>
     </div>
   )
 }
@@ -158,14 +156,10 @@ function LastUpdatedLine({ loading, latestHit }: { loading: boolean; latestHit: 
     return latest > 0 ? formatUpdatedAt(latest) : null
   }, [jobs, latestHit])
 
-  return (
-    <p className="hero-updated">
-      {loading ? '更新时间加载中…' : label ? `上次抓取结果 ${label}` : '暂无抓取结果'}
-    </p>
-  )
+  return <span>{loading ? '更新时间加载中…' : label ? `最近抓取 ${label}` : '暂无抓取结果'}</span>
 }
 
-function HeroCrawl({
+function CrawlButton({
   keywordId,
   onTriggered,
 }: {
@@ -174,15 +168,15 @@ function HeroCrawl({
 }) {
   const crawl = useCrawlTrigger()
   return (
-    <div className="hero-cta">
+    <div className="crawl-cta">
       {crawl.cooling && (
-        <span className="hero-cooldown" aria-live="polite">
+        <span className="crawl-cooldown" aria-live="polite">
           {formatCountdown(crawl.remaining)}
         </span>
       )}
       <button
         type="button"
-        className="btn btn-solid btn-crawl"
+        className="btn btn-outline"
         disabled={crawl.busy || crawl.cooling}
         onClick={() => {
           void crawl.trigger(keywordId).then((result) => {
@@ -192,7 +186,7 @@ function HeroCrawl({
       >
         {crawl.busy ? '触发中…' : '手动抓取'}
       </button>
-      {crawl.error && <p className="hero-crawl-error">{crawl.error}</p>}
+      {crawl.error && <p className="form-error">{crawl.error}</p>}
     </div>
   )
 }
@@ -221,6 +215,7 @@ export function KeywordFeedPage({ all = false }: Props) {
   const [loading, setLoading] = useState(true)
   const [totalPages, setTotalPages] = useState(1)
   const [storyGroups, setStoryGroups] = useState<StoryGroup[]>([])
+  const [total, setTotal] = useState<number | null>(null)
   const loadGenRef = useRef(0)
   const feedKeyRef = useRef('')
   const matchCountRef = useRef<{ key: string; count: number } | null>(null)
@@ -441,6 +436,7 @@ export function KeywordFeedPage({ all = false }: Props) {
         const nextStars = new Set((stars ?? []).map((s: { article_id: string }) => s.article_id))
         setStarredIds((prev) => (sameStringSet(prev, nextStars) ? prev : nextStars))
         matchCountRef.current = { key: countKey, count: matchCount }
+        setTotal(matchCount)
         const pagesFromCount = Math.max(1, Math.ceil(matchCount / PAGE_SIZE))
         setTotalPages(batch.totalPages ?? pagesFromCount)
 
@@ -573,117 +569,79 @@ export function KeywordFeedPage({ all = false }: Props) {
   }
 
   const title = all ? '全部关键词' : keyword?.phrase || '关键词新闻'
-  const lead = all
-    ? '汇总你所有关键词匹配到的报道。点标题阅读中文短讯，底部可打开原文。'
-    : '仅显示与该关键词匹配的报道。点标题阅读中文短讯，底部可打开原文。'
   const keywordsBooting = kwLoading && keywords.length === 0
+  const kicker = all ? `订阅 · ${keywords.length} 个关键词` : '关键词'
+  const note = (keyword?.ai_note || '').trim()
+  const lead = keywordsBooting ? (
+    '加载关键词中…'
+  ) : all ? (
+    '你所有关键词匹配到的报道，按发布时间排列。点标题读中文稿，文末可打开原文。'
+  ) : note ? (
+    <>
+      <span className="lead-label">AI 理解</span>
+      {note}
+    </>
+  ) : (
+    '与这个关键词相关的报道，按发布时间排列。'
+  )
 
   return (
-    <div className="feed-workspace">
-      <WorkspaceMasthead />
+    <div className="feed">
+      <PageHead
+        kicker={kicker}
+        title={title}
+        lead={lead}
+        meta={
+          <>
+            <LastUpdatedLine loading={loading || keywordsBooting} latestHit={latestHit} />
+            {total != null && !loading && <span>共 {total} 条</span>}
+          </>
+        }
+        actions={<CrawlButton keywordId={all ? null : keyword?.id} onTriggered={onCrawlTriggered} />}
+      />
 
-      <div className="feed-primary">
-        <section className="hero">
-          <div className="hero-copy">
-            <p className="eyebrow">{all ? 'All Keywords' : 'Keyword Feed'}</p>
-            <h1>{title}</h1>
-            <p className="hero-lead">{keywordsBooting ? '加载关键词中…' : lead}</p>
-            <div className="hero-footer">
-              <LastUpdatedLine loading={loading || keywordsBooting} latestHit={latestHit} />
-              <HeroCrawl keywordId={all ? null : keyword?.id} onTriggered={onCrawlTriggered} />
-            </div>
-          </div>
-          <div className="hero-window" aria-hidden="true" />
-        </section>
+      {error && <p className="notice notice-error">{error}</p>}
 
-        <section className="glass-panel feed">
-        <div className="panel-head">
-          <h2>{aiPending && !showFeed ? 'AI 进程' : '匹配结果'}</h2>
-          <span className="muted">
-            {loading || keywordsBooting
-              ? '加载中'
-              : aiPending && !showFeed
-                ? '处理中'
-                : totalPages > 1
-                  ? `第 ${page} / ${totalPages} 页`
-                  : `${storyGroups.length} 条`}
-          </span>
-        </div>
+      {aiPending && <AiProgressPanel pending={pendingKeywords} readyCount={readyKeywords.length} />}
 
-        {error && <p className="error">{error}</p>}
-
-        {aiPending && (
-          <AiProgressPanel pending={pendingKeywords} readyCount={readyKeywords.length} />
-        )}
-
-        {loading || keywordsBooting ? (
-          !aiPending && <p className="muted">正在加载新闻…</p>
-        ) : showFeed ? (
-          articles.length === 0 ? (
-            <div className="empty">
-              <p>暂时没有匹配的新闻。</p>
-              <p className="muted">
-                {all
-                  ? '当前订阅源里还没有足够贴近你关键词的报道，稍后再看。'
-                  : `当前订阅源里还没有足够贴近「${keyword?.phrase}」的报道，稍后再看。`}
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="story-list">
-                {storyGroups.map(({ article, alts }) => (
-                  <ArticleCard
-                    key={article.id}
-                    article={article}
-                    starred={starredIds.has(article.id)}
-                    matchedKeywords={matchedKeywordsById.get(article.id)}
-                    altSources={alts.map((a) => ({ source: a.source, url: a.url }))}
-                    canStar
-                    onToggleStar={toggleStar}
-                  />
-                ))}
-              </div>
-              <FeedPager page={page} totalPages={totalPages} disabled={loading} onChange={setPage} />
-            </>
-          )
-        ) : !aiPending ? (
+      {loading || keywordsBooting ? (
+        !aiPending && <p className="loading-line">正在加载新闻…</p>
+      ) : showFeed ? (
+        articles.length === 0 ? (
           <div className="empty">
-            <p>{all ? '还没有关键词。' : '关键词不存在。'}</p>
-            <p className="muted">
-              {all ? '在左侧点「添加关键词」，在侧栏直接输入即可。' : '请从左侧重新选择。'}
+            <p className="empty-title">暂时没有匹配的新闻</p>
+            <p>
+              {all
+                ? '订阅源里还没有贴近你关键词的报道，稍后再看。'
+                : `订阅源里还没有贴近「${keyword?.phrase}」的报道，稍后再看。`}
             </p>
           </div>
-        ) : null}
-        </section>
-      </div>
-
-      <aside className="editorial-rail" aria-label="编辑部信息">
-        <div className="editorial-rail-image" aria-hidden="true" />
-        <section className="editorial-rail-card">
-          <LastUpdatedLine loading={loading || keywordsBooting} latestHit={latestHit} />
-          <p className="editorial-rail-stats">
-            数据来源：{extraNewsNames.length} 个
-            <span aria-hidden="true">｜</span>
-            本页结果：{loading || keywordsBooting ? '—' : storyGroups.length} 条
-          </p>
-        </section>
-        <section className="editorial-process-shell">
-          <ProcessBanner />
-          <div className="editorial-idle-status">
-            <div>
-              <strong>后台空闲</strong>
-              <span>等待下一次任务</span>
-            </div>
-            <ol>
-              <li className="is-done">抓取最新资讯</li>
-              <li className="is-done">去重与清洗</li>
-              <li className="is-done">关键词匹配</li>
-              <li className="is-done">结果入库</li>
-            </ol>
-            <p>后台运行不影响浏览，新任务开始后会在这里显示进度。</p>
-          </div>
-        </section>
-      </aside>
+        ) : (
+          <>
+            <DispatchList
+              groups={storyGroups}
+              renderItem={({ article, alts }) => (
+                <ArticleCard
+                  key={article.id}
+                  article={article}
+                  stamp="time"
+                  starred={starredIds.has(article.id)}
+                  matchedKeywords={all ? matchedKeywordsById.get(article.id) : undefined}
+                  altSources={alts.map((a) => ({ source: a.source, url: a.url }))}
+                  canStar
+                  onToggleStar={toggleStar}
+                />
+              )}
+            />
+            <FeedPager page={page} totalPages={totalPages} disabled={loading} onChange={setPage} />
+          </>
+        )
+      ) : !aiPending ? (
+        <div className="empty">
+          <p className="empty-title">{all ? '还没有关键词' : '关键词不存在'}</p>
+          <p>{all ? '在目录里点「添加关键词」，用中文描述你想追踪的话题即可。' : '请从目录重新选择。'}</p>
+        </div>
+      ) : null}
     </div>
   )
 }
