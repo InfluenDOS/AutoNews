@@ -8,15 +8,20 @@ import {
   type ReactNode,
 } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
-import { isSupabaseConfigured, supabase, supabaseAnonKey, supabaseUrl } from '../lib/supabase'
+import { isSupabaseConfigured, supabase } from '../lib/supabase'
 
 type AuthContextValue = {
   user: User | null
   session: Session | null
   loading: boolean
   configured: boolean
-  signUp: (email: string, password: string) => Promise<{ error: string | null }>
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>
+  signUp: (
+    email: string,
+    password: string,
+    captchaToken?: string,
+  ) => Promise<{ error: string | null; alreadyRegistered?: boolean }>
+  signIn: (email: string, password: string, captchaToken?: string) => Promise<{ error: string | null }>
+  resendConfirmation: (email: string, captchaToken?: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
 }
 
@@ -53,39 +58,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const signUp = useCallback(async (email: string, password: string) => {
+  const signUp = useCallback(async (email: string, password: string, captchaToken?: string) => {
     if (!isSupabaseConfigured) {
       return { error: '尚未配置 Supabase，请设置 VITE_SUPABASE_URL 与 VITE_SUPABASE_ANON_KEY' }
     }
-    try {
-      const resp = await fetch(`${supabaseUrl}/functions/v1/web-signup`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: supabaseAnonKey,
-          Authorization: `Bearer ${supabaseAnonKey}`,
-        },
-        body: JSON.stringify({ email: email.trim(), password }),
-      })
-      const json = (await resp.json()) as { error?: string; message?: string }
-      if (resp.status === 404) {
-        const { error } = await supabase.auth.signUp({ email, password })
-        return { error: error?.message ?? null }
-      }
-      if (!resp.ok) {
-        return { error: json.message ?? json.error ?? 'signup_failed' }
-      }
-      return { error: null }
-    } catch {
-      return { error: 'network_error' }
-    }
+    // Plain signUp so Supabase enforces the captcha and sends the confirmation email.
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: { captchaToken, emailRedirectTo: `${window.location.origin}/` },
+    })
+    if (error) return { error: error.message }
+    // With confirmation on, an existing address gets a user with no identities
+    // instead of an error (so addresses cannot be enumerated) and no email.
+    return { error: null, alreadyRegistered: data.user?.identities?.length === 0 }
   }, [])
 
-  const signIn = useCallback(async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string, captchaToken?: string) => {
     if (!isSupabaseConfigured) {
       return { error: '尚未配置 Supabase，请设置 VITE_SUPABASE_URL 与 VITE_SUPABASE_ANON_KEY' }
     }
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+      options: { captchaToken },
+    })
+    return { error: error?.message ?? null }
+  }, [])
+
+  const resendConfirmation = useCallback(async (email: string, captchaToken?: string) => {
+    if (!isSupabaseConfigured) return { error: 'supabase is not configured' }
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: email.trim(),
+      options: { captchaToken, emailRedirectTo: `${window.location.origin}/` },
+    })
     return { error: error?.message ?? null }
   }, [])
 
@@ -102,9 +109,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       configured: isSupabaseConfigured,
       signUp,
       signIn,
+      resendConfirmation,
       signOut,
     }),
-    [user, session, loading, signUp, signIn, signOut],
+    [user, session, loading, signUp, signIn, resendConfirmation, signOut],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

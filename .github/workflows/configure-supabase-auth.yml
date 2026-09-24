@@ -1,4 +1,4 @@
-name: Configure Supabase auth and deploy signup function
+name: Configure Supabase auth and deploy scheduler function
 
 on:
   workflow_dispatch:
@@ -7,7 +7,6 @@ on:
     paths:
       - .github/workflows/configure-supabase-auth.yml
       - supabase/functions/schedule-dispatch/**
-      - supabase/functions/web-signup/**
 
 jobs:
   configure-and-deploy:
@@ -15,9 +14,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure auth (disable email confirmation)
+      - name: Configure auth (email confirmation + Turnstile captcha)
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
           PROJECT_REF: lmhxbkhanptelqltayzj
         run: |
           set -euo pipefail
@@ -28,18 +28,26 @@ jobs:
           fi
 
           echo "Updating Supabase auth config..."
+          # New accounts must confirm their email. The captcha is switched on only
+          # when its secret exists; the site must already ship the matching site key
+          # (repo variable VITE_TURNSTILE_SITE_KEY), or every sign-in would fail.
+          jq -n --arg secret "${TURNSTILE_SECRET_KEY:-}" '{
+              mailer_autoconfirm: false,
+              site_url: "https://speechlessgorilla.com",
+              uri_allow_list: "https://speechlessgorilla.com"
+            } + (if $secret == "" then {} else {
+              security_captcha_enabled: true,
+              security_captcha_provider: "turnstile",
+              security_captcha_secret: $secret
+            } end)' > /tmp/auth-body.json
           curl -sS -X PATCH "https://api.supabase.com/v1/projects/${PROJECT_REF}/config/auth" \
             -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d '{
-              "mailer_autoconfirm": true,
-              "site_url": "https://speechlessgorilla.com",
-              "uri_allow_list": "https://speechlessgorilla.com"
-            }' | tee /tmp/auth-config.json
+            --data-binary @/tmp/auth-body.json > /tmp/auth-config.json
 
           if jq -e '.message? // empty' /tmp/auth-config.json >/dev/null 2>&1; then
             echo "Auth config update may have failed:"
-            cat /tmp/auth-config.json
+            jq -r '.message' /tmp/auth-config.json
             exit 1
           fi
           echo "Auth config updated."
@@ -58,8 +66,5 @@ jobs:
             echo "SUPABASE_ACCESS_TOKEN secret is missing — skip function deploy."
             exit 0
           fi
-          supabase functions deploy web-signup \
-            --project-ref "${PROJECT_REF}" \
-            --no-verify-jwt
           supabase functions deploy schedule-dispatch \
             --project-ref "${PROJECT_REF}"

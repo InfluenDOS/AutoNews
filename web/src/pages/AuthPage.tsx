@@ -1,12 +1,14 @@
-import { useState, type FormEvent } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { useRef, useState, type FormEvent } from 'react'
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { IconEye, IconEyeOff } from '../components/NavIcons'
+import { TURNSTILE_SITE_KEY, Turnstile, type TurnstileHandle } from '../components/Turnstile'
 
 function translateAuthError(message: string): string {
   const m = message.toLowerCase()
   if (m.includes('invalid login')) return '邮箱或密码不正确'
-  if (m.includes('email not confirmed')) return '请先在邮箱中确认账号，或在 Supabase 关闭邮箱验证'
+  if (m.includes('email not confirmed')) return '邮箱还没确认：请点击注册确认邮件里的链接，没收到可以在下面重新发送'
+  if (m.includes('captcha')) return '人机验证没通过，请重新验证后再试'
   if (m.includes('user already registered') || m.includes('user_already_registered')) {
     return '该邮箱已注册，请直接登录'
   }
@@ -26,16 +28,22 @@ function translateAuthError(message: string): string {
 }
 
 export function AuthPage() {
-  const { user, signIn, signUp, loading } = useAuth()
+  const { user, signIn, signUp, resendConfirmation, loading } = useAuth()
   const navigate = useNavigate()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [searchParams] = useSearchParams()
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [linkExpired] = useState(() => searchParams.get('link') === 'expired')
   const [busy, setBusy] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [enterKey, setEnterKey] = useState(0)
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null)
+  const captcha = useRef<TurnstileHandle>(null)
+  const captchaRequired = Boolean(TURNSTILE_SITE_KEY)
 
   if (!loading && user) {
     return <Navigate to="/" replace />
@@ -45,29 +53,65 @@ export function AuthPage() {
     setMode((m) => (m === 'signin' ? 'signup' : 'signin'))
     setError(null)
     setMessage(null)
+    setUnconfirmedEmail(null)
     setEnterKey((k) => k + 1)
+  }
+
+  function needCaptcha(): boolean {
+    if (captchaRequired && !captchaToken) {
+      setError('请先完成下方的人机验证')
+      return true
+    }
+    return false
+  }
+
+  async function onResend() {
+    if (!unconfirmedEmail || needCaptcha()) return
+    setError(null)
+    setMessage(null)
+    setBusy(true)
+    try {
+      const { error: err } = await resendConfirmation(unconfirmedEmail, captchaToken ?? undefined)
+      if (err) setError(translateAuthError(err))
+      else setMessage(`确认邮件已重新发送到 ${unconfirmedEmail}，没收到请看看垃圾邮件。`)
+    } finally {
+      captcha.current?.reset()
+      setBusy(false)
+    }
   }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
     setMessage(null)
+    if (needCaptcha()) return
     setBusy(true)
+    const token = captchaToken ?? undefined
+    const address = email.trim()
     try {
       if (mode === 'signin') {
-        const { error: err } = await signIn(email.trim(), password)
-        if (err) setError(translateAuthError(err))
-        else navigate('/')
+        const { error: err } = await signIn(address, password, token)
+        if (!err) {
+          navigate('/')
+          return
+        }
+        setError(translateAuthError(err))
+        setUnconfirmedEmail(err.toLowerCase().includes('email not confirmed') ? address : null)
       } else {
-        const { error: err } = await signUp(email.trim(), password)
-        if (err) setError(translateAuthError(err))
-        else {
-          setMessage('注册成功，请直接登录。')
+        const { error: err, alreadyRegistered } = await signUp(address, password, token)
+        if (err) {
+          setError(translateAuthError(err))
+        } else if (alreadyRegistered) {
+          setError('该邮箱已注册，请直接登录')
+        } else {
           setMode('signin')
           setEnterKey((k) => k + 1)
+          setUnconfirmedEmail(address)
+          setMessage(`确认邮件已发送到 ${address}。请点击邮件里的链接完成注册，然后回来登录；没收到请看看垃圾邮件。`)
         }
       }
     } finally {
+      captcha.current?.reset()
       setBusy(false)
     }
   }
@@ -113,12 +157,26 @@ export function AuthPage() {
               </button>
             </div>
           </label>
+          {captchaRequired && <Turnstile ref={captcha} onToken={setCaptchaToken} />}
+          {linkExpired && !error && !message && (
+            <p className="error">确认链接已失效或已使用过。请直接登录；如果提示邮箱未确认，可以重新发送确认邮件。</p>
+          )}
           {error && <p className="error">{error}</p>}
           {message && <p className="ok">{message}</p>}
-          <button className="btn btn-solid" type="submit" disabled={busy}>
+          <button
+            className="btn btn-solid"
+            type="submit"
+            disabled={busy || (captchaRequired && !captchaToken)}
+          >
             {busy ? '请稍候…' : isSignIn ? '登录' : '注册'}
           </button>
         </form>
+
+        {isSignIn && unconfirmedEmail && (
+          <button type="button" className="auth-switch" onClick={onResend} disabled={busy}>
+            没收到确认邮件？重新发送
+          </button>
+        )}
 
         <button type="button" className="auth-switch" onClick={switchMode}>
           {isSignIn ? '没有账号？去注册' : '已有账号？去登录'}
