@@ -27,7 +27,12 @@ from extract import fetch_bodies
 from normalize import normalize_for_match, recall_score
 from relevance import filter_matches_with_relevance, retract_stale_feed
 from jobs import ensure_crawl_jobs, ensure_translate_jobs, mark_jobs
-from sources import PREVIEW_SOURCE_NAMES, is_news_source, register_news_names
+from sources import (
+    NEWS_SOURCE_NAMES,
+    PREVIEW_SOURCE_NAMES,
+    is_news_source,
+    register_news_names,
+)
 from story_cluster import cluster_stories
 from user_sources import collect_crawl_sources, default_allowed_names, load_source_bundles
 
@@ -38,6 +43,7 @@ USER_AGENT = "AutoNewsBot/1.0 (+https://github.com/AutoNews; RSS aggregator)"
 BODY_FETCH_MAX = int(os.environ.get("BODY_FETCH_MAX", "300"))
 # Cap on articles stored as keyword candidates this run (preview pool is separate).
 CANDIDATE_STORE_MAX = int(os.environ.get("CANDIDATE_STORE_MAX", "400"))
+BUILTIN_SOURCE_NAMES = NEWS_SOURCE_NAMES | PREVIEW_SOURCE_NAMES
 # Do not reinsert an old URL after retention cleanup merely because it remains
 # in a long RSS feed. Missing/unparseable publication dates are still accepted
 # and will age out according to articles.created_at.
@@ -167,26 +173,40 @@ def upsert_articles(sb: Client, articles: list[dict[str, Any]]) -> int:
     upsert sends the union of all row keys, so a body-less row mixed into a batch
     would send body=NULL and fail the NOT NULL constraint; a batch that omits the
     column entirely also leaves any body already stored for that URL untouched.
+
+    Articles from users' custom feeds may add new URLs but never overwrite an
+    existing row: the articles table is shared, and a feed could otherwise reuse a
+    real outlet's article URL to replace its title and summary for everyone.
     """
     if not articles:
         return 0
 
-    def write(rows: list[dict[str, Any]]) -> int:
+    def write(rows: list[dict[str, Any]], *, insert_only: bool) -> int:
         total = 0
         for i in range(0, len(rows), 100):
             chunk = rows[i : i + 100]
-            result = sb.table("articles").upsert(chunk, on_conflict="url").execute()
+            result = (
+                sb.table("articles")
+                .upsert(chunk, on_conflict="url", ignore_duplicates=insert_only)
+                .execute()
+            )
             total += len(result.data or chunk)
         return total
 
-    with_body = [a for a in articles if a.get("body")]
-    without_body = [{k: v for k, v in a.items() if k != "body"} for a in articles if not a.get("body")]
-    total = write(without_body)
-    try:
-        return total + write(with_body)
-    except Exception as exc:  # noqa: BLE001
-        print(f"article upsert with body failed ({exc}); retrying without body")
-        return total + write([{k: v for k, v in a.items() if k != "body"} for a in with_body])
+    def without_body(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [{k: v for k, v in a.items() if k != "body"} for a in rows]
+
+    total = 0
+    for insert_only in (False, True):
+        group = [a for a in articles if (a.get("source") not in BUILTIN_SOURCE_NAMES) == insert_only]
+        total += write(without_body([a for a in group if not a.get("body")]), insert_only=insert_only)
+        with_body = [a for a in group if a.get("body")]
+        try:
+            total += write(with_body, insert_only=insert_only)
+        except Exception as exc:  # noqa: BLE001
+            print(f"article upsert with body failed ({exc}); retrying without body")
+            total += write(without_body(with_body), insert_only=insert_only)
+    return total
 
 
 def resolve_article_ids(sb: Client, urls: list[str]) -> dict[str, str]:

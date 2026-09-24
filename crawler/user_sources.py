@@ -9,6 +9,17 @@ from sources import FEED_SOURCES, FeedSource, NEWS_SOURCES, NEWS_SOURCE_NAMES, P
 
 SERBIA_MAINSTREAM_KEY = "serbia_mainstream"
 
+# Articles are attributed and gated by source name, so a user feed may only use a
+# built-in name when it is that built-in feed. Otherwise a custom feed labelled
+# "Blic" would reach every default subscriber, and one labelled "Variety" would
+# land in the guest preview pool.
+_BUILTIN_URL_BY_NAME = {s.name.casefold(): s.url for s in FEED_SOURCES}
+
+
+def _impersonates_builtin(name: str, url: str) -> bool:
+    builtin_url = _BUILTIN_URL_BY_NAME.get(name.casefold())
+    return builtin_url is not None and builtin_url != url
+
 
 def _feeds_from_json(raw: Any) -> list[FeedSource]:
     if not isinstance(raw, list):
@@ -21,7 +32,7 @@ def _feeds_from_json(raw: Any) -> list[FeedSource]:
         name = str(item.get("name") or "").strip()
         url = str(item.get("url") or "").strip()
         country = str(item.get("country") or "REG").strip() or "REG"
-        if not name or not url or url in seen:
+        if not name or not url or url in seen or _impersonates_builtin(name, url):
             continue
         seen.add(url)
         out.append(FeedSource(name=name, url=url, country=country, kind="news"))
