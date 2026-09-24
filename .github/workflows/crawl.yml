@@ -16,6 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     # Downloading article bodies adds a few minutes over RSS-only crawling.
     timeout-minutes: 30
+    env:
+      # Stream progress lines as they happen instead of all at step exit.
+      PYTHONUNBUFFERED: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

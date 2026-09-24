@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
 # Digraphs must be processed before single letters
@@ -150,6 +151,10 @@ def to_cyrillic(text: str) -> str:
     return _apply_map(text, LATIN_TO_CYRILLIC)
 
 
+# Matching re-checks the same article text and words for every keyword and search
+# term, and the retract pass does so over the whole feed history each crawl. These
+# helpers are pure, so caching them turns that repeated work into lookups.
+@lru_cache(maxsize=200_000)
 def normalize_for_match(text: str) -> str:
     """Lowercase Latin form used for keyword matching."""
     if not text:
@@ -225,6 +230,7 @@ _FALSE_FRIEND_HITS = {
 _MIN_STEM = 4
 
 
+@lru_cache(maxsize=200_000)
 def light_stem(word: str) -> str:
     """Cheap Serbian-ish stem for matching inflected newspaper forms."""
     w = normalize_for_match(word)
@@ -246,7 +252,8 @@ def _drop_fugitive_a(form: str) -> str | None:
     return form[:-2] + form[-1]
 
 
-def stem_candidates(word: str) -> set[str]:
+@lru_cache(maxsize=200_000)
+def stem_candidates(word: str) -> frozenset[str]:
     """Word plus every form obtained by stripping ONE known inflectional ending.
 
     Two words are treated as the same lemma when their candidate sets overlap.
@@ -255,10 +262,10 @@ def stem_candidates(word: str) -> set[str]:
     """
     w = normalize_for_match(word)
     if not w:
-        return set()
+        return frozenset()
     out = {w}
     if len(w) < 5:
-        return out
+        return frozenset(out)
     for suf in _SR_SUFFIXES:
         if w.endswith(suf) and len(w) - len(suf) >= _MIN_STEM:
             out.add(w[: -len(suf)])
@@ -266,10 +273,11 @@ def stem_candidates(word: str) -> set[str]:
         collapsed = _drop_fugitive_a(form)
         if collapsed and len(collapsed) >= _MIN_STEM:
             out.add(collapsed)
-    return out
+    return frozenset(out)
 
 
-def _haystack_words(haystack: str) -> list[str]:
+@lru_cache(maxsize=4096)
+def _haystack_words(haystack: str) -> tuple[str, ...]:
     h = normalize_for_match(haystack)
     out: list[str] = []
     buf: list[str] = []
@@ -281,7 +289,7 @@ def _haystack_words(haystack: str) -> list[str]:
             buf = []
     if buf:
         out.append("".join(buf))
-    return out
+    return tuple(out)
 
 
 def _is_false_friend(query_token: str, hay_word: str) -> bool:

@@ -4,7 +4,9 @@ from normalize import (
     article_matches_keyword_row,
     expand_match_terms,
     matches_keyword,
+    matches_token,
     normalize_for_match,
+    stem_candidates,
     to_cyrillic,
     to_latin,
 )
@@ -74,6 +76,18 @@ def test_digraphs():
     assert "љ" in to_cyrillic("ljubav") or to_cyrillic("ljubav").startswith("љ")
 
 
+def test_cached_helpers_return_immutable_stable_results():
+    """Cached helpers hand the same object to every caller; it must not be mutable."""
+    forms = stem_candidates("izborima")
+    assert isinstance(forms, frozenset)
+    assert stem_candidates("izborima") is forms
+    hay = "Premijer Srbije o izborima, a u Beogradu premijera filma"
+    for _ in range(3):
+        assert matches_token(hay, "izbori")
+        assert matches_token(hay, "premijer")
+        assert not matches_token(hay, "migrant")
+
+
 if __name__ == "__main__":
     test_vucic_roundtrip()
     test_keyword_match_across_scripts()
@@ -81,4 +95,5 @@ if __name__ == "__main__":
     test_bare_premijer_cannot_carry_a_match()
     test_election_inflection_and_implied_location()
     test_digraphs()
+    test_cached_helpers_return_immutable_stable_results()
     print("ok")
