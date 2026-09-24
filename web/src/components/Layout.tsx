@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useJobsRefresh } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
 import { useSources } from '../context/SourcesContext'
-import { loadDailyPoem, type DailyPoem } from '../lib/dailyPoem'
+import { useHalfHourPoem } from '../hooks/useHalfHourPoem'
 import { ProcessBanner } from './ProcessBanner'
 import { BrandLogo } from './BrandLogo'
 import { ThemeToggle } from './ThemeToggle'
@@ -20,11 +20,6 @@ import {
 
 const SRC_OPEN_KEY = 'autonews-src-open-v1'
 const MOBILE_MQ = '(max-width: 960px)'
-const FALLBACK_POEM: DailyPoem = {
-  text: '溪云初起日沉阁，\n山雨欲来风满楼。',
-  author: '许浑',
-  source: '《咸阳城西楼晚眺》',
-}
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const { user, signOut, configured } = useAuth()
@@ -55,7 +50,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const addFormRef = useRef<HTMLFormElement>(null)
   const srcInputRef = useRef<HTMLInputElement>(null)
   const srcFormRef = useRef<HTMLFormElement>(null)
-  const [poem, setPoem] = useState<DailyPoem | null>(null)
+  const poem = useHalfHourPoem()
 
   function cancelAdd() {
     if (addBusy) return
@@ -136,20 +131,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
     document.addEventListener('pointerdown', onPointerDown)
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [srcAdding, srcBusy])
-
-  useEffect(() => {
-    let cancelled = false
-    void loadDailyPoem()
-      .then((p) => {
-        if (!cancelled) setPoem(p)
-      })
-      .catch(() => {
-        if (!cancelled) setPoem(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   // On mobile, close the left drawer after navigation.
   useEffect(() => {
@@ -239,7 +220,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
     day: 'numeric',
     weekday: 'long',
   }).format(new Date())
-  const shownPoem = poem ?? FALLBACK_POEM
 
   function openAddKeyword() {
     setAddError(null)
@@ -523,9 +503,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </nav>
 
         <figure className="rail-poem">
-          <blockquote>{shownPoem.text}</blockquote>
+          <blockquote>
+            {poem.lines[0]}，
+            <br />
+            {poem.lines[1]}。
+          </blockquote>
           <figcaption>
-            {shownPoem.author} {shownPoem.source}
+            {poem.author}《{poem.title}》
           </figcaption>
         </figure>
 

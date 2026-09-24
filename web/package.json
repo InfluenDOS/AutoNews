@@ -9,8 +9,9 @@
     "lint": "oxlint",
     "test:match": "node --experimental-strip-types scripts/normalize.parity.ts",
     "test:story": "node --experimental-strip-types scripts/storyDedup.parity.ts",
-    "test": "npm run test:match && npm run test:story",
-    "preview": "vite preview"
+    "test": "npm run test:match && npm run test:story && npm run test:poems",
+    "preview": "vite preview",
+    "test:poems": "node --experimental-strip-types scripts/poems.check.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
