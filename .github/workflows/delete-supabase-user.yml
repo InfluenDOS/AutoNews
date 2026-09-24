@@ -16,9 +16,11 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          EMAIL: ${{ github.event.inputs.email }}
+        # Public repository: keep the address out of the env block and the log.
         run: |
           set -euo pipefail
+          EMAIL=$(jq -r '.inputs.email' "$GITHUB_EVENT_PATH")
+          echo "::add-mask::${EMAIL}"
           if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
             echo "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY repository secret"
             exit 1

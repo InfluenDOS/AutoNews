@@ -23,3 +23,6 @@ Thumbs.db
 # Python
 *.egg-info/
 .pytest_cache/
+
+# Ad-hoc SQL scratch files (may contain user emails)
+/tmp_*.sql

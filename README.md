@@ -9,15 +9,15 @@ Hollywood feeds are guest preview only and are not keyword-matched.
 
 ```
 User → GitHub Pages (React) → Supabase (Auth + Postgres)
-GitHub Actions (every 15 min) → RSS feeds → Supabase articles
+GitHub Actions (hourly + on demand) → RSS feeds → Supabase articles
 ```
 
 ## 1. Supabase setup
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. Open **SQL Editor** and run migrations in order:
-   - [`supabase/migrations/001_initial_schema.sql`](supabase/migrations/001_initial_schema.sql)
-   - [`supabase/migrations/002_ai_chinese.sql`](supabase/migrations/002_ai_chinese.sql)
+2. Run every file in [`supabase/migrations/`](supabase/migrations/) in numeric order
+   (SQL Editor, or `npx supabase db query --linked -f <file>`), and record each one in
+   `supabase_migrations.schema_migrations` so `supabase db push` will not re-run it.
 3. In **Authentication → Providers**, keep Email enabled.
    - For local testing you may disable “Confirm email”.
 4. Copy **Project URL** and **anon public** key from **Settings → API**.
@@ -48,7 +48,7 @@ $env:SUPABASE_URL="https://YOUR_PROJECT.supabase.co"
 $env:SUPABASE_SERVICE_ROLE_KEY="your_service_role_key"
 $env:AI_API_KEY="your_deepseek_or_openai_key"
 $env:AI_BASE_URL="https://api.deepseek.com"   # OpenAI 则用 https://api.openai.com
-$env:AI_MODEL="deepseek-chat"                # OpenAI 可用 gpt-4o-mini
+$env:AI_MODEL="deepseek-flash"               # OpenAI 可用 gpt-4o-mini
 python crawl.py
 python process_ai.py
 ```
@@ -69,7 +69,7 @@ In the GitHub repo: **Settings → Secrets and variables → Actions**, add:
 | `SUPABASE_SERVICE_ROLE_KEY` | crawl workflow |
 | `AI_API_KEY` | crawl workflow（关键词提炼 + 中文翻译） |
 | `AI_BASE_URL` | 可选，默认 `https://api.deepseek.com` |
-| `AI_MODEL` | 可选，默认 `deepseek-chat` |
+| `AI_MODEL` | 设为仓库 **Variable**（非 Secret），爬虫默认 `deepseek-flash`；Edge Functions 读 Supabase secret `AI_MODEL`（当前 `deepseek-chat`） |
 | `VITE_SUPABASE_URL` | Pages deploy workflow |
 | `VITE_SUPABASE_ANON_KEY` | Pages deploy workflow |
 | `SUPABASE_ACCESS_TOKEN` | Optional: Supabase auth config + Edge Function deploy ([create token](https://supabase.com/dashboard/account/tokens)) |
@@ -79,7 +79,7 @@ In the GitHub repo: **Settings → Secrets and variables → Actions**, add:
 1. Push to `main` (or `master`).
 2. Repo **Settings → Pages → Build and deployment → Source**: **GitHub Actions**.
 3. The workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) builds `web/` and publishes it.
-4. Crawl runs every 15 minutes via [`.github/workflows/crawl.yml`](.github/workflows/crawl.yml) (also triggerable manually).
+4. Crawl runs hourly via [`.github/workflows/crawl.yml`](.github/workflows/crawl.yml), plus on demand when users add keywords or press the crawl button (Edge Functions dispatch it).
 
 ### Custom domain
 

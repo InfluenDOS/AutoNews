@@ -20,17 +20,25 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          EMAIL: ${{ github.event.inputs.email }}
-          PASSWORD: ${{ github.event.inputs.password }}
+        # This repository is public, and Actions prints each step's env block and
+        # expanded script in the log. Read the inputs from the event payload and
+        # mask them instead of passing them through env or ${{ }} expressions.
         run: |
           set -euo pipefail
+          EMAIL=$(jq -r '.inputs.email' "$GITHUB_EVENT_PATH")
+          PASSWORD=$(jq -r '.inputs.password' "$GITHUB_EVENT_PATH")
+          echo "::add-mask::${EMAIL}"
+          echo "::add-mask::${PASSWORD}"
+          jq -n --arg email "$EMAIL" --arg password "$PASSWORD" \
+            '{email: $email, password: $password, email_confirm: true}' > /tmp/register-body.json
           curl -sS -X POST "${SUPABASE_URL}/auth/v1/admin/users" \
             -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "Content-Type: application/json" \
-            -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\",\"email_confirm\":true}" | tee /tmp/register.json
-          if jq -e '.msg? // .message? // empty' /tmp/register.json | grep -qi error; then
-            cat /tmp/register.json
+            --data-binary @/tmp/register-body.json > /tmp/register.json
+          if ! jq -e '.id' /tmp/register.json > /dev/null; then
+            echo "Registration failed:"
+            jq -r '.msg // .message // .error_description // "unknown error"' /tmp/register.json
             exit 1
           fi
           echo "User registered."
