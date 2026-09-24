@@ -13,6 +13,8 @@ import json
 import os
 from typing import Any
 
+from postgrest.types import ReturnMethod
+
 from ai_client import ai_configured, chat_json
 from extract import clip_text
 from normalize import (
@@ -143,7 +145,9 @@ def save_relevance(sb: Any, rows: list[dict[str, Any]]) -> None:
         try:
             for i in range(0, len(payload), 100):
                 sb.table("article_keyword_relevance").upsert(
-                    payload[i : i + 100], on_conflict="keyword_id,article_id"
+                    payload[i : i + 100],
+                    on_conflict="keyword_id,article_id",
+                    returning=ReturnMethod.minimal,
                 ).execute()
             return
         except Exception as exc:  # noqa: BLE001

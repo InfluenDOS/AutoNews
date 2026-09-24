@@ -21,6 +21,7 @@ from typing import Any
 
 import feedparser
 import httpx
+from postgrest.types import ReturnMethod
 from supabase import Client, create_client
 
 from extract import fetch_bodies
@@ -44,6 +45,8 @@ BODY_FETCH_MAX = int(os.environ.get("BODY_FETCH_MAX", "300"))
 # Cap on articles stored as keyword candidates this run (preview pool is separate).
 CANDIDATE_STORE_MAX = int(os.environ.get("CANDIDATE_STORE_MAX", "400"))
 BUILTIN_SOURCE_NAMES = NEWS_SOURCE_NAMES | PREVIEW_SOURCE_NAMES
+# Hour (UTC) of the daily retract pass; see crawl().
+RETRACT_HOUR_UTC = int(os.environ.get("RETRACT_HOUR_UTC", "3"))
 # Do not reinsert an old URL after retention cleanup merely because it remains
 # in a long RSS feed. Missing/unparseable publication dates are still accepted
 # and will age out according to articles.created_at.
@@ -187,7 +190,12 @@ def upsert_articles(sb: Client, articles: list[dict[str, Any]]) -> int:
             chunk = rows[i : i + 100]
             result = (
                 sb.table("articles")
-                .upsert(chunk, on_conflict="url", ignore_duplicates=insert_only)
+                .upsert(
+                    chunk,
+                    on_conflict="url",
+                    ignore_duplicates=insert_only,
+                    returning=ReturnMethod.minimal,
+                )
                 .execute()
             )
             total += len(result.data or chunk)
@@ -229,7 +237,9 @@ def merge_hits(sb: Client, hits: list[dict[str, str]]) -> int:
     chunk_size = 200
     for i in range(0, len(hits), chunk_size):
         chunk = hits[i : i + chunk_size]
-        sb.table("article_hits").upsert(chunk, on_conflict="user_id,article_id").execute()
+        sb.table("article_hits").upsert(
+            chunk, on_conflict="user_id,article_id", returning=ReturnMethod.minimal
+        ).execute()
         inserted += len(chunk)
     return inserted
 
@@ -437,7 +447,14 @@ def crawl() -> None:
             cluster_stories(sb, cluster_ids)
         except Exception as exc:  # noqa: BLE001
             print(f"story_cluster after crawl failed: {exc}")
-    retracted, dropped_stale = retract_stale_feed(sb, user_keywords)
+    # The retract pass re-reads every approved article (with body) to re-apply
+    # changed gates to old verdicts. That was most of the project's database egress
+    # at ~40 crawls a day, so run it once a day; FORCE_RETRACT=1 runs it now.
+    retracted = dropped_stale = 0
+    if datetime.now(timezone.utc).hour == RETRACT_HOUR_UTC or os.environ.get("FORCE_RETRACT") == "1":
+        retracted, dropped_stale = retract_stale_feed(sb, user_keywords)
+    else:
+        print(f"Retract: skipped (runs during {RETRACT_HOUR_UTC:02d}:00 UTC)")
     # Only prune this-run keyword candidates that never became hits.
     # Matched articles (hits) are permanent user feed content — never wiped on crawl.
     candidate_ids = {id_by_url[u] for u in (a["url"] for a in candidates) if u in id_by_url}

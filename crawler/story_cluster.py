@@ -7,6 +7,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from postgrest.types import ReturnMethod
+
 from ai_client import ai_configured, chat_json
 from dedup import TITLE_JACCARD_THRESHOLD, published_close, title_jaccard, title_tokens
 from extract import clip_text
@@ -282,7 +284,9 @@ def _upsert_pairs(sb: Any, rows: list[dict[str, Any]]) -> int:
     for i in range(0, len(rows), 80):
         chunk = rows[i : i + 80]
         try:
-            sb.table("article_story_pairs").upsert(chunk, on_conflict="article_lo,article_hi").execute()
+            sb.table("article_story_pairs").upsert(
+                chunk, on_conflict="article_lo,article_hi", returning=ReturnMethod.minimal
+            ).execute()
             written += len(chunk)
         except Exception as exc:  # noqa: BLE001
             print(f"story_cluster upsert failed: {exc}")

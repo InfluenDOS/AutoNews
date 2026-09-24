@@ -6,6 +6,8 @@ import json
 import sys
 from typing import Any
 
+from postgrest.types import ReturnMethod
+
 from ai_client import ai_configured, chat_json
 from crawl import get_supabase
 from jobs import job_title, mark_jobs, phrase_label
@@ -446,7 +448,8 @@ def _record_translate_failure(
             {
                 "translate_attempts": attempts,
                 "translate_error": (reason or "rewrite_failed")[:500],
-            }
+            },
+            returning=ReturnMethod.minimal,
         ).eq("id", rid).execute()
     except Exception as exc:  # noqa: BLE001
         print(f"  warn: could not record translate failure for {rid}: {exc}", file=sys.stderr)
@@ -473,7 +476,9 @@ def _mark_catch_up(
         if is_catch_up_row(row):
             continue
         try:
-            sb.table("articles").update({"translate_error": CATCH_UP_MARK}).eq("id", rid).execute()
+            sb.table("articles").update(
+                {"translate_error": CATCH_UP_MARK}, returning=ReturnMethod.minimal
+            ).eq("id", rid).execute()
             marked += 1
         except Exception as exc:  # noqa: BLE001
             print(f"  warn: could not mark catch-up for {rid}: {exc}", file=sys.stderr)
@@ -645,7 +650,10 @@ def translate_articles(
             if tracking:
                 payload["translate_attempts"] = 0
                 payload["translate_error"] = ""
-            sb.table("articles").update(payload).eq("id", row["id"]).execute()
+            # Articles carry body and match text; do not echo the whole row back.
+            sb.table("articles").update(payload, returning=ReturnMethod.minimal).eq(
+                "id", row["id"]
+            ).execute()
             done += 1
             items.append(
                 {

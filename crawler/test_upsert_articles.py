@@ -22,7 +22,7 @@ class _Table:
     def __init__(self, calls: list) -> None:
         self.calls = calls
 
-    def upsert(self, rows, on_conflict, ignore_duplicates=False):
+    def upsert(self, rows, on_conflict, ignore_duplicates=False, returning=None):
         return _Query(self.calls, rows, ignore_duplicates)
 
 
