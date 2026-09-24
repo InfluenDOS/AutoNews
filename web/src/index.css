@@ -1450,7 +1450,7 @@ ol {
   text-wrap: balance;
   margin-top: 12px;
   font-family: var(--serif);
-  font-size: clamp(26px, 2.9vw, 36px);
+  font-size: clamp(24px, 2.6vw, 34px);
   font-weight: 900;
   line-height: 1.4;
 }

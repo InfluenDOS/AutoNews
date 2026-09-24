@@ -124,11 +124,7 @@ export function AuthPage() {
       <section className="auth-poster" aria-label="AutoNews 简介">
         <BrandLogo className="seal-lg" />
         <p className="kicker">AutoNews · 中文电讯</p>
-        <p className="auth-poster-title">
-          用中文写下关心的事，
-          <br />
-          每小时收到塞尔维亚的相关报道。
-        </p>
+        <p className="auth-poster-title">用中文写下关心的事，每小时收到塞尔维亚的相关报道。</p>
         <ol className="auth-steps">
           <li>
             <b>写下关键词</b>
