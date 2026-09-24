@@ -1930,8 +1930,8 @@ ol {
   font-synthesis-weight: none;
 }
 
+/* The ridges sit behind the rail's footer; spacing stays identical to 电讯. */
 [data-skin='bamboo'] .rail {
-  padding-bottom: 104px;
   background-image: var(--ridges);
   background-position: bottom;
   background-repeat: no-repeat;
@@ -2001,6 +2001,10 @@ ol {
 [data-skin='bamboo'] .btn-outline:hover:not(:disabled) {
   background: var(--accent);
   color: var(--accent-ink);
+}
+
+[data-skin='bamboo'] .theme-toggle {
+  background: var(--surface);
 }
 
 [data-skin='bamboo'] .theme-toggle button.is-on,
@@ -2083,7 +2087,4 @@ ol {
     height: 220px;
   }
 
-  [data-skin='bamboo'] .rail {
-    padding-bottom: 104px;
-  }
 }
