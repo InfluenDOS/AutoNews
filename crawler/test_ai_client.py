@@ -46,9 +46,11 @@ class ChatJsonTests(unittest.TestCase):
             },
         )
         self.env.start()
+        ai_client._unavailable = None
 
     def tearDown(self) -> None:
         self.env.stop()
+        ai_client._unavailable = None
 
     def test_disables_thinking_for_structured_calls(self) -> None:
         client = FakeClient([FakeResponse('{"ok": true}')])
@@ -71,6 +73,16 @@ class ChatJsonTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ai_client.chat_json("return json", "input")
         self.assertEqual(len(client.payloads), 2)
+
+    def test_balance_refusal_stops_later_calls(self) -> None:
+        client = FakeClient([FakeResponse("", status_code=402, text="Insufficient Balance")])
+        with patch.object(ai_client.httpx, "Client", return_value=client):
+            with self.assertRaises(ai_client.AIUnavailable):
+                ai_client.chat_json("return json", "input")
+            with self.assertRaises(ai_client.AIUnavailable):
+                ai_client.chat_json("return json", "input")
+        # The second call never reached the provider.
+        self.assertEqual(len(client.payloads), 1)
 
 
 if __name__ == "__main__":

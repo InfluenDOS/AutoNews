@@ -67,3 +67,12 @@ def test_pick_translate_batch_does_not_inflate_token_budget():
     )
     assert len(batch) == 40
     assert sum(1 for r in batch if str(r["id"]).startswith("c")) == 8
+
+
+if __name__ == "__main__":
+    # CI runs `python test_*.py`; without this block none of the tests above ran.
+    for _name, _fn in sorted(globals().items()):
+        if _name.startswith("test_") and callable(_fn):
+            _fn()
+            print(f"ok  {_name}")
+    print("translate queue tests passed")

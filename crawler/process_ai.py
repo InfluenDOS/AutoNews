@@ -8,7 +8,7 @@ from typing import Any
 
 from postgrest.types import ReturnMethod
 
-from ai_client import ai_configured, chat_json
+from ai_client import AIUnavailable, ai_configured, chat_json
 from crawl import get_supabase
 from jobs import job_title, mark_jobs, phrase_label
 from sources import PREVIEW_SOURCE_NAMES
@@ -667,6 +667,12 @@ def translate_articles(
                 }
             )
             print(f"  [{idx}/{len(rows)}] {out['title_zh']}")
+        except AIUnavailable as exc:
+            # Account refusal, not this article's fault: leave its attempt count alone
+            # and stop, instead of logging the same refusal for every remaining row.
+            failed += len(rows) - idx + 1
+            print(f"  stopped at {idx}/{len(rows)}: {exc}", file=sys.stderr)
+            break
         except Exception as exc:  # noqa: BLE001
             failed += 1
             print(f"  FAILED {row.get('id')}: {exc}", file=sys.stderr)

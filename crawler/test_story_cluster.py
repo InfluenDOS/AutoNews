@@ -1,4 +1,5 @@
-from story_cluster import classify_pair, cluster_stories, propose_pairs
+import story_cluster
+from story_cluster import classify_pair, cluster_stories, propose_pairs, shown_together
 from dedup import title_tokens
 
 PUB = "2026-09-05T20:59:00+00:00"
@@ -89,6 +90,40 @@ check("rule pair skips AI", len(ai2), 0)
 existing = {(similar["id"], similar2["id"]) if similar["id"] < similar2["id"] else (similar2["id"], similar["id"])}
 rule3, ai3 = propose_pairs([similar], [similar, similar2], existing)
 check("existing pair not proposed again", (len(rule3), len(ai3)), (0, 0))
+
+check("no reader map keeps every pair", shown_together("x", "y", None), True)
+check("shared reader keeps pair", shown_together("x", "y", {"x": {"u1"}, "y": {"u1", "u2"}}), True)
+check("disjoint readers drop pair", shown_together("x", "y", {"x": {"u1"}, "y": {"u2"}}), False)
+check("reader-less preview keeps pair", shown_together("x", "y", {"x": {"u1"}}), True)
+
+split_readers = {a["id"]: {"u1"}, b["id"]: {"u2"}, c["id"]: {"u1", "u2"}}
+_, ai_split = propose_pairs([a, b, c], [a, b, c], set(), split_readers)
+ai_split_keys = {tuple(sorted((l["id"], r["id"]))) for l, r in ai_split}
+check("pair across disjoint feeds not sent to AI", tuple(sorted((a["id"], b["id"]))) in ai_split_keys, False)
+check("pairs inside one feed still sent", len(ai_split_keys), 2)
+
+
+def _fake_story_chat(_system: str, user: str, **_kw: object) -> dict:
+    import json as _json
+
+    sent = _json.loads(user)["pairs"]
+    _fake_story_chat.sent = sent
+    return {"results": [{"n": p["n"], "same": p["n"] == 1, "reason": "mock"} for p in sent]}
+
+
+_saved_story = (story_cluster.chat_json, story_cluster.ai_configured)
+story_cluster.chat_json = _fake_story_chat
+story_cluster.ai_configured = lambda: True
+try:
+    scored = story_cluster.score_story_pairs([(a, b), (b, c)])
+finally:
+    story_cluster.chat_json, story_cluster.ai_configured = _saved_story
+check("story prompt carries no UUIDs", "aa000000" in str(_fake_story_chat.sent), False)
+check(
+    "story verdicts map back by pair number",
+    {(r["article_lo"], r["article_hi"]): r["same"] for r in scored},
+    {(a["id"], b["id"]): True, (b["id"], c["id"]): False},
+)
 
 
 class _FakeQuery:

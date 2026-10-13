@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from postgrest.types import ReturnMethod
 
-from ai_client import ai_configured, chat_json
+from ai_client import AIUnavailable, ai_configured, chat_json
 from dedup import TITLE_JACCARD_THRESHOLD, published_close, title_jaccard, title_tokens
 from extract import clip_text
 
@@ -22,7 +22,7 @@ STORY_SYSTEM = """你是新闻去重审核员。判断两篇稿是否报道**同
 改写、翻译、详略不同、不同报社仍算同一件。
 两起不同的同类事件（例如两起不同的逮捕或行贿）必须判 false。
 只依据给出的来源、标题与摘要，不要臆造。拿不准一律 false。
-只输出 JSON：{"results":[{"a":"id","b":"id","same":true/false,"reason":"一句中文理由"}]}
+只输出 JSON：{"results":[{"n":对编号,"same":true/false,"reason":"一句中文理由"}]}
 results 必须覆盖用户给出的每一对。"""
 
 
@@ -63,12 +63,35 @@ def classify_pair(a: dict[str, Any], b: dict[str, Any]) -> str:
     return "skip"
 
 
+def shown_together(
+    aid: str, bid: str, readers: dict[str, set[str]] | None
+) -> bool:
+    """Could one reader's feed contain both articles?
+
+    Pairs are only read to group cards inside a single user's feed, so a pair whose
+    articles belong to disjoint readers never changes what anyone sees. An article
+    with no known reader (a guest preview) is visible to everyone.
+    """
+    if readers is None:
+        return True
+    left = readers.get(aid)
+    right = readers.get(bid)
+    if not left or not right:
+        return True
+    return not left.isdisjoint(right)
+
+
 def propose_pairs(
     focus: list[dict[str, Any]],
     pool: list[dict[str, Any]],
     existing: set[tuple[str, str]],
+    readers: dict[str, set[str]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], dict[str, Any]]]]:
-    """Split unseen pairs into rule-same rows and AI candidates."""
+    """Split unseen pairs into rule-same rows and AI candidates.
+
+    `readers` (article id -> user ids holding it) drops pairs no single feed shows.
+    Such a pair is not stored, so it is proposed again if a reader later holds both.
+    """
     by_id = {str(r.get("id") or ""): r for r in pool if r.get("id")}
     for row in focus:
         rid = str(row.get("id") or "")
@@ -94,6 +117,8 @@ def propose_pairs(
             if key in seen:
                 continue
             seen.add(key)
+            if not shown_together(aid, bid, readers):
+                continue
             kind = classify_pair(a, b)
             if kind == "same":
                 rule_rows.append(
@@ -119,11 +144,13 @@ def score_story_pairs(
     budget = pairs[:STORY_DEDUP_MAX_PAIRS]
     for i in range(0, len(budget), STORY_DEDUP_BATCH):
         chunk = budget[i : i + STORY_DEDUP_BATCH]
+        # Pairs are numbered 1..n: echoing two UUIDs back per pair was most of the
+        # output tokens, and a mis-copied UUID silently dropped the verdict.
         payload = {
             "pairs": [
                 {
+                    "n": n,
                     "a": {
-                        "id": str(left.get("id") or ""),
                         "source": str(left.get("source") or "")[:80],
                         "title": str(left.get("title") or "")[:200],
                         "title_zh": str(left.get("title_zh") or "")[:200],
@@ -133,7 +160,6 @@ def score_story_pairs(
                         ),
                     },
                     "b": {
-                        "id": str(right.get("id") or ""),
                         "source": str(right.get("source") or "")[:80],
                         "title": str(right.get("title") or "")[:200],
                         "title_zh": str(right.get("title_zh") or "")[:200],
@@ -143,7 +169,7 @@ def score_story_pairs(
                         ),
                     },
                 }
-                for left, right in chunk
+                for n, (left, right) in enumerate(chunk, start=1)
             ]
         }
         try:
@@ -153,18 +179,24 @@ def score_story_pairs(
                 temperature=0.0,
                 max_tokens=800,
             )
+        except AIUnavailable as exc:
+            print(f"story_cluster AI stopped: {exc}")
+            break
         except Exception as exc:  # noqa: BLE001
             print(f"story_cluster AI failed: {exc}")
             continue
         results = data.get("results") or []
         if not isinstance(results, list):
             continue
-        wanted = {pair_key(str(left.get("id") or ""), str(right.get("id") or "")) for left, right in chunk}
+        by_number = {
+            str(n): pair_key(str(left.get("id") or ""), str(right.get("id") or ""))
+            for n, (left, right) in enumerate(chunk, start=1)
+        }
         for row in results:
             if not isinstance(row, dict):
                 continue
-            key = pair_key(str(row.get("a") or ""), str(row.get("b") or ""))
-            if key not in wanted or not key[0] or not key[1]:
+            key = by_number.get(str(row.get("n") or "").strip())
+            if not key or not key[0] or not key[1]:
                 continue
             same = row.get("same")
             if not isinstance(same, bool):
@@ -277,6 +309,44 @@ def _load_neighbor_ids(sb: Any, focus_ids: list[str]) -> list[str]:
     return list(dict.fromkeys(neighbor))
 
 
+def _load_readers(sb: Any, ids: list[str]) -> dict[str, set[str]] | None:
+    """article id -> users whose feed or stars hold it; None if the lookup failed.
+
+    Paged per chunk so a partial reader set can never hide a pair someone sees.
+    """
+    readers: dict[str, set[str]] = {}
+    uniq = [i for i in dict.fromkeys(ids) if i]
+    page_size = 1000
+    for table in ("article_hits", "stars"):
+        for i in range(0, len(uniq), 100):
+            chunk = uniq[i : i + 100]
+            offset = 0
+            while True:
+                try:
+                    rows = (
+                        sb.table(table)
+                        .select("user_id, article_id")
+                        .in_("article_id", chunk)
+                        .order("article_id")
+                        .order("user_id")
+                        .range(offset, offset + page_size - 1)
+                        .execute()
+                        .data
+                        or []
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    print(f"story_cluster load readers failed ({table}): {exc}")
+                    return None
+                for row in rows:
+                    aid, uid = row.get("article_id"), row.get("user_id")
+                    if aid and uid:
+                        readers.setdefault(str(aid), set()).add(str(uid))
+                if len(rows) < page_size:
+                    break
+                offset += page_size
+    return readers
+
+
 def _upsert_pairs(sb: Any, rows: list[dict[str, Any]]) -> int:
     if not rows:
         return 0
@@ -311,7 +381,8 @@ def cluster_stories(
         return 0
     focus = [a for a in articles if str(a.get("id") or "") in set(ids)]
     existing = _load_existing_pairs(sb, pool_ids)
-    rule_rows, ai_pairs = propose_pairs(focus, articles, existing)
+    readers = _load_readers(sb, pool_ids)
+    rule_rows, ai_pairs = propose_pairs(focus, articles, existing, readers)
     scorer = score_fn if score_fn is not None else score_story_pairs
     ai_rows = scorer(ai_pairs)
     written = _upsert_pairs(sb, rule_rows + ai_rows)

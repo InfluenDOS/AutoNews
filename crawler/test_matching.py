@@ -11,6 +11,7 @@ from normalize import (
     recall_score,
     term_weight,
 )
+import relevance
 from relevance import item_id, rule_confident, scoring_item, verdict_should_stand
 from sources import NEWS_SOURCE_NAMES, PREVIEW_SOURCE_NAMES, is_news_source
 
@@ -407,6 +408,42 @@ check(
     "the same lemma from a Serbian newsroom may still shortlist",
     verdict_should_stand(CROATIAN_HEADLINE, LOOSE_WITH_GENERIC, source="Blic"),
     True,
+)
+
+
+def _fake_relevance_chat(_system: str, user: str, **_kw: object) -> dict:
+    import json as _json
+
+    sent = _json.loads(user)["articles"]
+    _fake_relevance_chat.sent_ids = [a["id"] for a in sent]
+    # Answer out of order and with one unknown number, like a sloppy model would.
+    return {
+        "results": [
+            {"id": "2", "relevant": False, "reason": "off-topic"},
+            {"id": "1", "relevant": True, "reason": "on-topic"},
+            {"id": "9", "relevant": True, "reason": "not asked"},
+        ]
+    }
+
+
+_saved = (relevance.chat_json, relevance.ai_configured)
+relevance.chat_json = _fake_relevance_chat
+relevance.ai_configured = lambda: True
+try:
+    verdicts = relevance.score_batch(
+        "塞尔维亚总理",
+        [
+            {"article_id": "uuid-aaa", "title": "A", "summary": "a"},
+            {"article_id": "uuid-bbb", "title": "B", "summary": "b"},
+        ],
+    )
+finally:
+    relevance.chat_json, relevance.ai_configured = _saved
+check("relevance prompt sends short ids", _fake_relevance_chat.sent_ids, ["1", "2"])
+check(
+    "relevance verdicts map back to article ids",
+    {k: v[0] for k, v in verdicts.items()},
+    {"uuid-aaa": True, "uuid-bbb": False},
 )
 
 

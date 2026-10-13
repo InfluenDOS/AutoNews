@@ -5,9 +5,22 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from typing import Any
 
 import httpx
+
+
+# Account-level refusals: 401 bad key, 402 balance exhausted. Every later call in the
+# same process would fail the same way, so the first one switches AI off for the run.
+ACCOUNT_ERROR_STATUSES = (401, 402)
+
+
+class AIUnavailable(RuntimeError):
+    """The provider refused the account; retrying within this run is pointless."""
+
+
+_unavailable: str | None = None
 
 
 def ai_configured() -> bool:
@@ -26,7 +39,20 @@ def _settings() -> tuple[str, str, str]:
     return key, base, model
 
 
+def _refuse_account(status: int, text: str) -> AIUnavailable:
+    global _unavailable
+    _unavailable = f"HTTP {status}: {(text or '')[:200]}"
+    # A GitHub Actions annotation, so a run that silently fell back to rules is visible.
+    print(
+        f"::error title=AI provider refused::{_unavailable} — skipping the remaining AI calls this run",
+        file=sys.stderr,
+    )
+    return AIUnavailable(_unavailable)
+
+
 def chat_json(system: str, user: str, *, temperature: float = 0.2, max_tokens: int = 600) -> dict[str, Any]:
+    if _unavailable:
+        raise AIUnavailable(_unavailable)
     key, base, model = _settings()
     url = f"{base}/v1/chat/completions"
     payload = {
@@ -66,6 +92,8 @@ def chat_json(system: str, user: str, *, temperature: float = 0.2, max_tokens: i
                 supports_response_format = False
                 request_payload.pop("response_format", None)
                 resp = client.post(url, headers=headers, json=request_payload)
+            if resp.status_code in ACCOUNT_ERROR_STATUSES:
+                raise _refuse_account(resp.status_code, resp.text)
             resp.raise_for_status()
             data = resp.json()
             content = data["choices"][0]["message"].get("content") or ""

@@ -55,7 +55,7 @@ RELEVANCE_SYSTEM = """你是新闻订阅的相关性审核员。用户用一句�
 - 若用户订阅的是更具体的主题（总理、选举、对华投资等），仅出现国名或地名绝对不够。
 
 只依据给出的来源、标题与正文判断，不要臆造。results 必须覆盖用户给出的每一个 id。
-只输出 JSON：{"results":[{"id":"文章id","relevant":true/false,"reason":"一句中文理由"}]}"""
+只输出 JSON：{"results":[{"id":"文章编号","relevant":true/false,"reason":"一句中文理由"}]}"""
 
 
 def stage1_match(article: dict[str, Any], row: dict[str, Any]) -> bool:
@@ -181,10 +181,17 @@ def score_batch(
     if not ai_configured():
         return {}
 
+    # The model sees 1..n instead of UUIDs: it echoes every id back, and a UUID costs
+    # ~25 output tokens and is easy to mis-copy (a mis-copied id loses its verdict).
+    articles = [scoring_item(it) for it in items]
+    real_ids: dict[str, str] = {}
+    for n, art in enumerate(articles, start=1):
+        real_ids[str(n)] = art["id"]
+        art["id"] = str(n)
     payload = {
         "intent": phrase,
         "wrong_sense_terms": avoid or [],
-        "articles": [scoring_item(it) for it in items],
+        "articles": articles,
     }
     data = chat_json(
         RELEVANCE_SYSTEM,
@@ -197,7 +204,7 @@ def score_batch(
         for r in results:
             if not isinstance(r, dict):
                 continue
-            rid = str(r.get("id") or "")
+            rid = real_ids.get(str(r.get("id") or "").strip())
             if rid:
                 out[rid] = (bool(r.get("relevant")), str(r.get("reason") or "")[:300])
     return out
