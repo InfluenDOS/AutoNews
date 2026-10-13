@@ -1,3 +1,4 @@
+import io
 import os
 import unittest
 from unittest.mock import patch
@@ -76,13 +77,17 @@ class ChatJsonTests(unittest.TestCase):
 
     def test_balance_refusal_stops_later_calls(self) -> None:
         client = FakeClient([FakeResponse("", status_code=402, text="Insufficient Balance")])
-        with patch.object(ai_client.httpx, "Client", return_value=client):
+        # Swallow the ::error:: annotation so the Tests run does not show a fake 402.
+        with patch.object(ai_client.httpx, "Client", return_value=client), patch(
+            "sys.stderr", new_callable=io.StringIO
+        ) as err:
             with self.assertRaises(ai_client.AIUnavailable):
                 ai_client.chat_json("return json", "input")
             with self.assertRaises(ai_client.AIUnavailable):
                 ai_client.chat_json("return json", "input")
         # The second call never reached the provider.
         self.assertEqual(len(client.payloads), 1)
+        self.assertIn("::error", err.getvalue())
 
 
 if __name__ == "__main__":
