@@ -69,8 +69,9 @@ jobs:
           set -euo pipefail
           for f in $FUNCTIONS; do
             [[ "$f" =~ ^[a-z0-9-]+$ && -d "supabase/functions/$f" ]] || { echo "unknown function: $f"; exit 1; }
-            # Keep whatever JWT setting the live function has.
-            verify=$(curl -sS "$API/functions/$f" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" | jq -r '.verify_jwt // true')
+            # Keep whatever JWT setting the live function has. Read it from the list:
+            # the single-function endpoint did not return verify_jwt for this token.
+            verify=$(curl -sS "$API/functions" -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN"               | jq -r --arg f "$f" '(.[] | select(.slug == $f) | .verify_jwt) // true')
             flag=""
             [ "$verify" = "false" ] && flag="--no-verify-jwt"
             echo "Deploying $f (verify_jwt=$verify)"
