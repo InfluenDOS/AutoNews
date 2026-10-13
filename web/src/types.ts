@@ -23,6 +23,8 @@ export type Keyword = {
   match_mode?: 'loose' | 'strict'
   exclude_terms?: string[]
   ai_note?: string
+  /** Sources this keyword reads; null/absent = every source the user has. */
+  source_keys?: string[] | null
   created_at: string
 }
 

@@ -58,6 +58,29 @@ RELEVANCE_SYSTEM = """你是新闻订阅的相关性审核员。用户用一句�
 只输出 JSON：{"results":[{"id":"文章编号","relevant":true/false,"reason":"一句中文理由"}]}"""
 
 
+# Used instead of RELEVANCE_SYSTEM when the keyword reads its own, non-Serbian
+# outlets. Same standard, without the Serbia-only rules.
+RELEVANCE_SYSTEM_ANY_REGION = """你是新闻订阅的相关性审核员。用户用一句中文写下他想追踪的主题，并指定了要读的媒体（sources）。你要判断每篇稿件是不是真的在讲这个主题。宁可漏掉，也不要把无关稿件放进订阅。
+
+判定 relevant=true 需同时满足：
+① 稿件的**主要内容**就是用户描述的主题，而不是顺带提及、背景引用、文末链接或事后回顾；
+② 命中的词是用户要的那个意思。
+
+以下情况必须判 false：
+- 同形异义词、同名不同人、同一个词的另一个意思。词义要看上下文，不要只看字面。
+- 只是碰巧出现了相同的词：讲的是别的国家、别的人、别的事件。
+- 只在文末、引语或相关链接里被提到一句。
+- 娱乐、影视、体育、明星八卦——除非用户订阅的本来就是这个主题。
+- 主题里点明了国家或地区时，讲的是别处的同类事件。
+- 拿不准：一律 false。
+
+注意：要素可以是隐含的。媒体报道本国事务时通常不会重复写国名，
+不要因为正文字面没出现主题里的国名就判否；但仅出现国名或地名绝对不够。
+
+只依据给出的来源、标题与正文判断，不要臆造。results 必须覆盖用户给出的每一个 id。
+只输出 JSON：{"results":[{"id":"文章编号","relevant":true/false,"reason":"一句中文理由"}]}"""
+
+
 def stage1_match(article: dict[str, Any], row: dict[str, Any]) -> bool:
     """Shortlist only: does the article show the keyword's topic, not just a place name?"""
     return recall_score(article, row) > 0
@@ -173,9 +196,17 @@ def scoring_item(it: dict[str, Any]) -> dict[str, str]:
 
 
 def score_batch(
-    phrase: str, items: list[dict[str, str]], *, avoid: list[str] | None = None
+    phrase: str,
+    items: list[dict[str, str]],
+    *,
+    avoid: list[str] | None = None,
+    feeds: list[dict[str, str]] | None = None,
 ) -> dict[str, tuple[bool, str]]:
-    """items: [{id, title, summary, body, source}] -> id -> (relevant, reason)."""
+    """items: [{id, title, summary, body, source}] -> id -> (relevant, reason).
+
+    `feeds` (the keyword's own non-Serbian outlets) selects the any-region prompt;
+    without it the request is exactly the Serbia one.
+    """
     if not items:
         return {}
     if not ai_configured():
@@ -188,13 +219,22 @@ def score_batch(
     for n, art in enumerate(articles, start=1):
         real_ids[str(n)] = art["id"]
         art["id"] = str(n)
-    payload = {
+    system = RELEVANCE_SYSTEM
+    payload: dict[str, Any] = {
         "intent": phrase,
         "wrong_sense_terms": avoid or [],
         "articles": articles,
     }
+    if feeds:
+        system = RELEVANCE_SYSTEM_ANY_REGION
+        payload = {
+            "intent": phrase,
+            "sources": [f.get("name") or "" for f in feeds],
+            "wrong_sense_terms": avoid or [],
+            "articles": articles,
+        }
     data = chat_json(
-        RELEVANCE_SYSTEM,
+        system,
         json.dumps(payload, ensure_ascii=False),
         temperature=0.0,
     )
@@ -272,6 +312,7 @@ def filter_matches_with_relevance(
 
         phrase = items[0]["keyword_phrase"]
         avoid = clean_exclude_terms(items[0].get("exclude_terms"))
+        feeds = items[0].get("source_feeds")
 
         for i in range(0, len(unique), BATCH_SIZE):
             if scored >= MAX_SCORE_PER_RUN:
@@ -281,7 +322,7 @@ def filter_matches_with_relevance(
                 break
             chunk = unique[i : i + BATCH_SIZE][: MAX_SCORE_PER_RUN - scored]
             try:
-                result = score_batch(phrase, chunk, avoid=avoid)
+                result = score_batch(phrase, chunk, avoid=avoid, feeds=feeds)
             except Exception as exc:  # noqa: BLE001
                 print(f"relevance batch failed for {kid}: {exc}")
                 result = {}

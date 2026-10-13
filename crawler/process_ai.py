@@ -9,9 +9,10 @@ from typing import Any
 from postgrest.types import ReturnMethod
 
 from ai_client import AIUnavailable, ai_configured, chat_json
-from crawl import get_supabase
+from crawl import attach_keyword_scopes, get_supabase, scope_feeds
 from jobs import job_title, mark_jobs, phrase_label
 from sources import PREVIEW_SOURCE_NAMES
+from user_sources import load_source_bundles
 from story_cluster import cluster_stories
 from normalize import (
     clean_exclude_terms,
@@ -50,6 +51,33 @@ EXPAND_SYSTEM = """你是塞尔维亚新闻检索助手。用户用中文描述�
          ["ilegalni migranti","ilegalne migracije","illegal migrants"],
          ["Srbija","Srbiji","Serbia"]]。
 6. 只拆真正的核心要素。本国媒体不会逐字重复的语境（本国国名、显而易见的地点）最多占一组；
+   程序性细节（被拘留、召开会议、表示关切）不要单独成组，融进要素短语里。
+7. 组数宁少勿多：2～3 组能表达就不要凑到 4 组。
+8. ai_note 用一句中文说明你如何理解该意图；不要 Markdown。"""
+
+
+# Used instead of EXPAND_SYSTEM when the keyword reads its own, non-Serbian outlets.
+# Keep in sync with EXPAND_SYSTEM_ANY_REGION in supabase/functions/expand-keyword.
+EXPAND_SYSTEM_ANY_REGION = """你是新闻检索助手。用户用中文描述订阅意图，并指定了要读的媒体（名称与网址）。你输出用于匹配这些媒体原文的检索结构。
+只输出 JSON：
+{
+  "match_mode": "loose" 或 "strict",
+  "match_groups": [["variantA","variantB"], ["variantC"]],
+  "search_terms": ["phrase1","phrase2"],
+  "exclude_terms": ["wrongSense"],
+  "ai_note": "一句中文说明"
+}
+
+硬性规则：
+1. 检索词一律用这些媒体发稿所用的语言（看媒体名称与网址判断；多种语言就每种都给），严禁中文。
+2. 有词形变化的语言，每个词都要带常见变化形式（单复数、变格、变位）。
+3. 消歧优先。若某词多义、或与人名/常用词同形，不要单独给出：
+   要么写成消歧的多词短语，要么把错误义项放进 exclude_terms。
+4. 短话题（1～2个要素）→ match_mode=loose；search_terms 给 6～10 条，优先多词短语；
+   只有用户确实想订阅整个大领域时才给裸单词。
+5. 多要素长意图 → match_mode=strict；match_groups 给 2～4 组核心要素
+   （组内是同一要素的多语言/多变形写法，组间要求「基本都要沾边」）。
+6. 只拆真正的核心要素。媒体所在国报道本国事务时不会逐字重复国名，这类显而易见的语境最多占一组；
    程序性细节（被拘留、召开会议、表示关切）不要单独成组，融进要素短语里。
 7. 组数宁少勿多：2～3 组能表达就不要凑到 4 组。
 8. ai_note 用一句中文说明你如何理解该意图；不要 Markdown。"""
@@ -99,17 +127,30 @@ def _drop_chinese(items: Any) -> list[str]:
     ]
 
 
-def expand_keyword_phrase(phrase: str) -> dict[str, Any]:
+def expand_keyword_phrase(phrase: str, feeds: list[dict[str, str]] | None = None) -> dict[str, Any]:
+    """`feeds` (the keyword's own non-Serbian outlets) selects the any-region prompt."""
     suggested = suggest_match_mode(phrase)
-    data = chat_json(
-        EXPAND_SYSTEM,
-        (
-            f"用户输入：{phrase}\n"
-            f"（建议 match_mode={suggested}；检索词必须是塞尔维亚语/英语原文，不要中文；"
-            f"若意图含地点，match_groups 必须单独有一组地点变体；"
-            f"多义词请消歧或写进 exclude_terms）"
-        ),
-    )
+    if feeds:
+        outlets = "；".join(f"{f.get('name')}（{f.get('url')}）" for f in feeds[:20])
+        data = chat_json(
+            EXPAND_SYSTEM_ANY_REGION,
+            (
+                f"用户输入：{phrase}\n要读的媒体：{outlets}\n"
+                f"（建议 match_mode={suggested}；检索词必须是这些媒体所用语言的原文，不要中文；"
+                f"若意图含地点，match_groups 必须单独有一组地点变体；"
+                f"多义词请消歧或写进 exclude_terms）"
+            ),
+        )
+    else:
+        data = chat_json(
+            EXPAND_SYSTEM,
+            (
+                f"用户输入：{phrase}\n"
+                f"（建议 match_mode={suggested}；检索词必须是塞尔维亚语/英语原文，不要中文；"
+                f"若意图含地点，match_groups 必须单独有一组地点变体；"
+                f"多义词请消歧或写进 exclude_terms）"
+            ),
+        )
 
     groups = clean_match_groups(data.get("match_groups"))
     groups = [_drop_chinese(g) for g in groups]
@@ -172,6 +213,7 @@ def _keyword_needs_expand(row: dict[str, Any], force: bool) -> bool:
 def process_keywords(limit: int = 30, force: bool = False) -> int:
     sb = get_supabase()
     selects = (
+        "id, user_id, phrase, search_terms, match_groups, match_mode, exclude_terms, expand_version, source_keys",
         "id, phrase, search_terms, match_groups, match_mode, exclude_terms, expand_version",
         "id, phrase, search_terms, match_groups, match_mode",
         "id, phrase, search_terms",
@@ -185,6 +227,11 @@ def process_keywords(limit: int = 30, force: bool = False) -> int:
             continue
     rows = (result.data or []) if result is not None else []
     pending = [r for r in rows if _keyword_needs_expand(r, force)][:limit]
+    if any(r.get("source_keys") for r in pending):
+        by_user: dict[str, list[dict[str, Any]]] = {}
+        for r in pending:
+            by_user.setdefault(str(r.get("user_id") or ""), []).append(r)
+        attach_keyword_scopes(by_user, load_source_bundles(sb))
     print(f"Keywords pending AI expansion: {len(pending)}")
     if pending:
         phrases = [str(r.get("phrase") or "") for r in pending]
@@ -202,7 +249,7 @@ def process_keywords(limit: int = 30, force: bool = False) -> int:
         if not phrase:
             continue
         try:
-            expanded = expand_keyword_phrase(phrase)
+            expanded = expand_keyword_phrase(phrase, scope_feeds(row))
             terms = expanded["search_terms"] or [phrase]
             groups = expanded["match_groups"]
             mode = expanded["match_mode"]

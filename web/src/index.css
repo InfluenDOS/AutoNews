@@ -2094,3 +2094,39 @@ ol {
   }
 
 }
+
+/* Per-keyword source choice inside the add-keyword form */
+.rail-source-pick {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.rail-source-pick legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.rail-source-pick label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+/* Undo the text-field look .rail-add-form input gives every input */
+.rail-add-form .rail-source-pick input {
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  accent-color: var(--ink);
+}

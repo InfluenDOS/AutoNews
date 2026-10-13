@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
@@ -123,3 +124,60 @@ def collect_crawl_sources(
 
     feeds = [*NEWS_SOURCES, *extra, *PREVIEW_SOURCES]
     return feeds, extra_names, user_allowed
+
+
+@dataclass(frozen=True)
+class KeywordScope:
+    """The sources one keyword reads, when the user picked them.
+
+    `feeds` is empty when every picked source is the built-in Serbian set, so the
+    Serbia prompts stay in use; otherwise it lists the outlets for the prompts.
+    """
+
+    names: frozenset[str]
+    feeds: tuple[FeedSource, ...]
+
+
+def bundles_by_user(bundles: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {}
+    for row in bundles:
+        uid = row.get("user_id")
+        if uid:
+            out.setdefault(uid, []).append(row)
+    return out
+
+
+def keyword_scope(row: dict[str, Any], user_bundles: list[dict[str, Any]]) -> KeywordScope | None:
+    """None keeps the original behaviour: every source the user has, Serbia prompts.
+
+    keywords.source_keys holds user_source_bundles ids, or SERBIA_MAINSTREAM_KEY for
+    the built-in outlets. Picked sources that were since deleted or failed are skipped;
+    when none is left the keyword falls back to every source instead of going silent.
+    """
+    keys = [str(k).strip() for k in (row.get("source_keys") or []) if str(k).strip()]
+    if not keys:
+        return None
+    by_id = {str(b.get("id")): b for b in user_bundles}
+    names: set[str] = set()
+    feeds: list[FeedSource] = []
+    serbia_only = True
+    for key in dict.fromkeys(keys):
+        if key == SERBIA_MAINSTREAM_KEY:
+            names.update(s.name for s in NEWS_SOURCES)
+            feeds.extend(NEWS_SOURCES)
+            continue
+        bundle = by_id.get(key)
+        if (
+            not bundle
+            or bundle.get("kind") == "preset"
+            or not bundle.get("enabled")
+            or bundle.get("status") != "ready"
+        ):
+            continue
+        for feed in _feeds_from_json(bundle.get("resolved_feeds")):
+            names.add(feed.name)
+            feeds.append(feed)
+            serbia_only = False
+    if not names:
+        return None
+    return KeywordScope(frozenset(names), () if serbia_only else tuple(feeds))

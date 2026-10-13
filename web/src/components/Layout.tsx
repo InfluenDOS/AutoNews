@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useJobsRefresh } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
 import { useSources } from '../context/SourcesContext'
+import { SERBIA_MAINSTREAM_KEY } from '../lib/sources'
 import { useHalfHourPoem } from '../hooks/useHalfHourPoem'
 import { FALLBACK_POEM } from '../lib/poems'
 import { ProcessBanner } from './ProcessBanner'
@@ -41,6 +42,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
   })
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
+  // Sources picked for the keyword being added; empty = every source.
+  const [draftSources, setDraftSources] = useState<string[]>([])
   const [addBusy, setAddBusy] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
   const [srcAdding, setSrcAdding] = useState(false)
@@ -58,6 +61,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     if (addBusy) return
     setAdding(false)
     setDraft('')
+    setDraftSources([])
     setAddError(null)
   }
 
@@ -167,7 +171,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     setAddError(null)
     setAddBusy(true)
     void refreshJobs()
-    const result = await addKeyword(draft)
+    const result = await addKeyword(draft, draftSources)
     await refreshJobs()
     setAddBusy(false)
     if (result.error) {
@@ -175,6 +179,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       return
     }
     setDraft('')
+    setDraftSources([])
     setAdding(false)
     if (result.id) navigate(`/k/${result.id}`)
   }
@@ -215,6 +220,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
       return
     }
     if (location.pathname === `/s/${id}`) navigate('/sources')
+  }
+
+  // Sources a new keyword can be limited to: the built-in set plus ready custom ones.
+  const pickableSources = sourceItems
+    .filter((s) => s.status === 'ready' && (s.kind === 'preset' || s.feeds.length > 0))
+    .map((s) => ({ key: s.kind === 'preset' ? SERBIA_MAINSTREAM_KEY : s.id, label: s.label }))
+  const sourceLabel = new Map(pickableSources.map((s) => [s.key, s.label]))
+  function keywordTitle(k: { phrase: string; source_keys?: string[] | null }) {
+    const keys = k.source_keys ?? []
+    if (keys.length === 0) return k.phrase
+    return `${k.phrase}\n抓取源：${keys.map((key) => sourceLabel.get(key) ?? '已删除的源').join('、')}`
   }
 
   const today = new Intl.DateTimeFormat('zh-CN', {
@@ -303,7 +319,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               {user &&
                 keywords.map((k) => (
                   <li key={k.id} className="rail-row">
-                    <NavLink to={`/k/${k.id}`} className="rail-link" title={k.phrase}>
+                    <NavLink to={`/k/${k.id}`} className="rail-link" title={keywordTitle(k)}>
                       <span className="rail-mark" aria-hidden>
                         #
                       </span>
@@ -347,6 +363,27 @@ export function Layout({ children }: { children: React.ReactNode }) {
                       <button type="submit" disabled={addBusy || !draft.trim()}>
                         {addBusy ? '…' : '添加'}
                       </button>
+                      {pickableSources.length > 1 && (
+                        <fieldset className="rail-source-pick" disabled={addBusy}>
+                          <legend>抓取源{draftSources.length === 0 ? '（不选 = 全部）' : ''}</legend>
+                          {pickableSources.map((s) => (
+                            <label key={s.key}>
+                              <input
+                                type="checkbox"
+                                checked={draftSources.includes(s.key)}
+                                onChange={(e) =>
+                                  setDraftSources((prev) =>
+                                    e.target.checked
+                                      ? [...prev, s.key]
+                                      : prev.filter((k) => k !== s.key),
+                                  )
+                                }
+                              />
+                              <span>{s.label}</span>
+                            </label>
+                          ))}
+                        </fieldset>
+                      )}
                       {addError && <p className="form-error">{addError}</p>}
                     </form>
                   ) : (

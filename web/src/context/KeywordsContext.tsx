@@ -17,7 +17,7 @@ type KeywordsContextValue = {
   keywords: Keyword[]
   loading: boolean
   refresh: (opts?: { quiet?: boolean }) => Promise<void>
-  addKeyword: (phrase: string) => Promise<{ id?: string; error?: string }>
+  addKeyword: (phrase: string, sourceKeys?: string[]) => Promise<{ id?: string; error?: string }>
   deleteKeyword: (id: string) => Promise<{ error?: string }>
 }
 
@@ -68,7 +68,7 @@ export function KeywordsProvider({ children }: { children: ReactNode }) {
   }, [user, keywords, refresh])
 
   const addKeyword = useCallback(
-    async (phrase: string) => {
+    async (phrase: string, sourceKeys?: string[]) => {
       if (!user || !isSupabaseConfigured) return { error: '请先登录' }
       const trimmed = phrase.trim()
       if (!trimmed) return { error: '请输入关键词' }
@@ -80,6 +80,8 @@ export function KeywordsProvider({ children }: { children: ReactNode }) {
           normalized_phrase: normalizeForMatch(trimmed),
           search_terms: [],
           ai_note: '',
+          // Only sent when chosen: no choice means every source, as before.
+          ...(sourceKeys && sourceKeys.length > 0 ? { source_keys: sourceKeys } : {}),
         })
         .select('id')
         .maybeSingle()

@@ -23,7 +23,7 @@ import sys
 from typing import Any
 
 from ai_client import AIUnavailable, ai_configured
-from crawl import get_supabase, load_user_keywords
+from crawl import attach_keyword_scopes, get_supabase, load_user_keywords, scope_feeds
 from normalize import clean_exclude_terms, recall_score
 from relevance import BATCH_SIZE, load_relevance_cache, save_relevance, score_batch, verdict_should_stand
 from sources import register_news_names
@@ -66,8 +66,10 @@ def main() -> None:
 
     sb = get_supabase()
     user_keywords = load_user_keywords(sb)
-    _, extra_names, _ = collect_crawl_sources(load_source_bundles(sb))
+    bundles = load_source_bundles(sb)
+    _, extra_names, _ = collect_crawl_sources(bundles)
     register_news_names(extra_names)
+    attach_keyword_scopes(user_keywords, bundles)
 
     hits = _page(
         lambda: sb.table("article_hits")
@@ -93,7 +95,9 @@ def main() -> None:
         rows = [
             (row["id"], row)
             for row in user_keywords.get(h["user_id"], [])
-            if row.get("id") and recall_score(art, row) > 0
+            if row.get("id")
+            and (row.get("_scope") is None or (art.get("source") or "") in row["_scope"].names)
+            and recall_score(art, row) > 0
         ]
         pairs_by_hit[(h["user_id"], h["article_id"])] = rows
 
@@ -119,7 +123,10 @@ def main() -> None:
             chunk = items[i : i + BATCH_SIZE]
             try:
                 result = score_batch(
-                    row.get("phrase") or "", chunk, avoid=clean_exclude_terms(row.get("exclude_terms"))
+                    row.get("phrase") or "",
+                    chunk,
+                    avoid=clean_exclude_terms(row.get("exclude_terms")),
+                    feeds=scope_feeds(row),
                 )
             except AIUnavailable as exc:
                 print(f"AI unavailable, stopping: {exc}", file=sys.stderr)

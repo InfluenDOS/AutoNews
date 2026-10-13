@@ -35,7 +35,13 @@ from sources import (
     register_news_names,
 )
 from story_cluster import cluster_stories
-from user_sources import collect_crawl_sources, default_allowed_names, load_source_bundles
+from user_sources import (
+    bundles_by_user,
+    collect_crawl_sources,
+    default_allowed_names,
+    keyword_scope,
+    load_source_bundles,
+)
 
 
 USER_AGENT = "AutoNewsBot/1.0 (+https://github.com/AutoNews; RSS aggregator)"
@@ -125,6 +131,7 @@ def load_user_keywords(sb: Client) -> dict[str, list[dict[str, Any]]]:
     """Map user_id -> that user's keyword rows (for per-keyword strict/loose match)."""
     # Widest select first; fall back when a migration has not been applied yet.
     selects = (
+        "id, user_id, phrase, search_terms, match_groups, match_mode, exclude_terms, source_keys",
         "id, user_id, phrase, search_terms, match_groups, match_mode, exclude_terms",
         "id, user_id, phrase, search_terms, match_groups, match_mode",
         "id, user_id, phrase, search_terms",
@@ -148,21 +155,45 @@ def load_user_keywords(sb: Client) -> dict[str, list[dict[str, Any]]]:
     return {uid: rows for uid, rows in by_user.items() if rows}
 
 
+def attach_keyword_scopes(
+    user_keywords: dict[str, list[dict[str, Any]]], bundles: list[dict[str, Any]]
+) -> None:
+    """Set row["_scope"]: the keyword's own sources, or None for every user source."""
+    by_user = bundles_by_user(bundles)
+    for uid, rows in user_keywords.items():
+        for row in rows:
+            row["_scope"] = keyword_scope(row, by_user.get(uid, []))
+
+
+def scope_feeds(row: dict[str, Any]) -> list[dict[str, str]] | None:
+    """Outlets for the any-region prompts; None keeps the Serbia prompts."""
+    scope = row.get("_scope")
+    if scope is None or not scope.feeds:
+        return None
+    return [{"name": f.name, "url": f.url} for f in scope.feeds]
+
+
 def matching_keyword_rows(
     article: dict[str, Any],
     user_keywords: dict[str, list[dict[str, Any]]],
     user_allowed: dict[str, set[str]] | None = None,
 ) -> list[tuple[str, dict[str, Any], int]]:
-    """Topic shortlist: (user_id, keyword_row, recall_score). Place-only is not enough."""
+    """Topic shortlist: (user_id, keyword_row, recall_score). Place-only is not enough.
+
+    A keyword with its own sources reads only those; the rest read every source the
+    user has enabled.
+    """
     src = article.get("source") or ""
     out: list[tuple[str, dict[str, Any], int]] = []
     for uid, rows in user_keywords.items():
         allowed = user_allowed.get(uid) if user_allowed is not None else None
         if allowed is None:
             allowed = default_allowed_names()
-        if src not in allowed:
-            continue
+        user_reads = src in allowed
         for row in rows:
+            scope = row.get("_scope")
+            if not (user_reads if scope is None else src in scope.names):
+                continue
             score = recall_score(article, row)
             if score > 0:
                 out.append((uid, row, score))
@@ -299,8 +330,10 @@ def crawl() -> None:
     sb = get_supabase()
     user_keywords = load_user_keywords(sb)
     print(f"Users with keywords: {len(user_keywords)}")
-    crawl_feeds, extra_news_names, user_allowed = collect_crawl_sources(load_source_bundles(sb))
+    bundles = load_source_bundles(sb)
+    crawl_feeds, extra_news_names, user_allowed = collect_crawl_sources(bundles)
     register_news_names(extra_news_names)
+    attach_keyword_scopes(user_keywords, bundles)
     for uid in user_keywords:
         user_allowed.setdefault(uid, default_allowed_names())
     print(f"Crawl feeds: {len(crawl_feeds)} (extra news names {len(extra_news_names)})")
@@ -435,6 +468,7 @@ def crawl() -> None:
                     "match_groups": row.get("match_groups"),
                     "search_terms": row.get("search_terms"),
                     "exclude_terms": row.get("exclude_terms"),
+                    "source_feeds": scope_feeds(row),
                     "article_id": aid,
                     "title": article.get("title") or "",
                     "summary": article.get("summary") or "",

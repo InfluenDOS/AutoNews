@@ -28,6 +28,76 @@ const EXPAND_SYSTEM = `你是塞尔维亚新闻检索助手。用户用中文描
 7. 组数宁少勿多：2～3 组能表达就不要凑到 4 组。
 8. ai_note 用一句中文说明你如何理解该意图；不要 Markdown。`
 
+// Used instead of EXPAND_SYSTEM when the keyword reads its own, non-Serbian outlets.
+// Keep in sync with EXPAND_SYSTEM_ANY_REGION in crawler/process_ai.py.
+const EXPAND_SYSTEM_ANY_REGION = `你是新闻检索助手。用户用中文描述订阅意图，并指定了要读的媒体（名称与网址）。你输出用于匹配这些媒体原文的检索结构。
+只输出 JSON：
+{"match_mode":"loose|strict","match_groups":[["variantA","variantB"]],"search_terms":["phrase"],"exclude_terms":["wrongSense"],"ai_note":"一句中文"}
+
+硬性规则：
+1. 检索词一律用这些媒体发稿所用的语言（看媒体名称与网址判断；多种语言就每种都给），严禁中文。
+2. 有词形变化的语言，每个词都要带常见变化形式（单复数、变格、变位）。
+3. 消歧优先。若某词多义、或与人名/常用词同形，不要单独给出：
+   要么写成消歧的多词短语，要么把错误义项放进 exclude_terms。
+4. 短话题（1～2个要素）→ match_mode=loose；search_terms 给 6～10 条，优先多词短语；
+   只有用户确实想订阅整个大领域时才给裸单词。
+5. 多要素长意图 → match_mode=strict；match_groups 给 2～4 组核心要素
+   （组内是同一要素的多语言/多变形写法，组间要求「基本都要沾边」）。
+6. 只拆真正的核心要素。媒体所在国报道本国事务时不会逐字重复国名，这类显而易见的语境最多占一组；
+   程序性细节（被拘留、召开会议、表示关切）不要单独成组，融进要素短语里。
+7. 组数宁少勿多：2～3 组能表达就不要凑到 4 组。
+8. ai_note 用一句中文说明你如何理解该意图；不要 Markdown。`
+
+const SERBIA_MAINSTREAM_KEY = 'serbia_mainstream'
+
+type Feed = { name: string; url: string }
+
+// The outlets a keyword picked, or null to keep the Serbia prompt. Mirrors
+// keyword_scope() in crawler/user_sources.py: only the built-in Serbian set (or
+// nothing usable) keeps the original prompt.
+async function scopeFeeds(
+  admin: ReturnType<typeof createClient>,
+  userId: string,
+  sourceKeys: unknown,
+): Promise<Feed[] | null> {
+  const keys = Array.isArray(sourceKeys)
+    ? [...new Set(sourceKeys.map((k) => String(k ?? '').trim()).filter(Boolean))]
+    : []
+  const bundleIds = keys.filter((k) => k !== SERBIA_MAINSTREAM_KEY)
+  if (bundleIds.length === 0) return null
+  const { data } = await admin
+    .from('user_source_bundles')
+    .select('id, kind, enabled, status, resolved_feeds')
+    .eq('user_id', userId)
+    .in('id', bundleIds)
+  const custom: Feed[] = []
+  for (const b of data ?? []) {
+    if (b.kind === 'preset' || !b.enabled || b.status !== 'ready') continue
+    for (const f of Array.isArray(b.resolved_feeds) ? b.resolved_feeds : []) {
+      const name = String(f?.name ?? '').trim()
+      const url = String(f?.url ?? '').trim()
+      if (name && url) custom.push({ name, url })
+    }
+  }
+  if (custom.length === 0) return null
+  const builtin: Feed[] = keys.includes(SERBIA_MAINSTREAM_KEY)
+    ? SERBIA_MAINSTREAM_FEEDS.map((f) => ({ ...f }))
+    : []
+  return [...builtin, ...custom]
+}
+
+// Keep in sync with NEWS_SOURCES in crawler/sources.py.
+const SERBIA_MAINSTREAM_FEEDS: Feed[] = [
+  { name: 'Blic', url: 'https://www.blic.rs/rss/vesti' },
+  { name: 'Blic Politika', url: 'https://www.blic.rs/rss/vesti/politika' },
+  { name: 'B92', url: 'https://www.b92.net/info/rss/vesti.xml' },
+  { name: 'RTS', url: 'https://www.rts.rs/page/stories/ci/rss.html' },
+  { name: 'Novosti', url: 'https://www.novosti.rs/rss/vesti' },
+  { name: 'N1 Serbia', url: 'https://n1info.rs/feed/' },
+  { name: 'Danas', url: 'https://www.danas.rs/feed/' },
+  { name: 'Balkan Insight', url: 'https://balkaninsight.com/feed/' },
+]
+
 type ExpandResult = {
   match_mode: 'strict' | 'loose'
   match_groups: string[][]
@@ -339,11 +409,19 @@ Deno.serve(async (req) => {
       })
     }
 
-    const { data: row, error: loadErr } = await admin
+    let { data: row, error: loadErr } = await admin
       .from('keywords')
-      .select('id, user_id, phrase, search_terms, match_groups')
+      .select('id, user_id, phrase, search_terms, match_groups, source_keys')
       .eq('id', keywordId)
       .maybeSingle()
+    if (loadErr) {
+      // Migration 022 may not be applied yet; such a keyword has no own sources.
+      ;({ data: row, error: loadErr } = await admin
+        .from('keywords')
+        .select('id, user_id, phrase, search_terms, match_groups')
+        .eq('id', keywordId)
+        .maybeSingle())
+    }
 
     if (loadErr || !row) {
       return new Response(JSON.stringify({ error: 'keyword not found' }), {
@@ -397,10 +475,19 @@ Deno.serve(async (req) => {
         }
 
         const suggested = suggestMatchMode(phrase)
-        const raw = await chatJson(
-          EXPAND_SYSTEM,
-          `用户输入：${phrase}\n（系统建议 match_mode=${suggested}；检索词必须是塞尔维亚语/英语原文；长意图请用 strict+match_groups）`,
-        )
+        const feeds = await scopeFeeds(admin, user.id, (row as { source_keys?: unknown }).source_keys)
+        const raw = feeds
+          ? await chatJson(
+              EXPAND_SYSTEM_ANY_REGION,
+              `用户输入：${phrase}\n要读的媒体：${feeds
+                .slice(0, 20)
+                .map((f) => `${f.name}（${f.url}）`)
+                .join('；')}\n（系统建议 match_mode=${suggested}；检索词必须是这些媒体所用语言的原文；长意图请用 strict+match_groups）`,
+            )
+          : await chatJson(
+              EXPAND_SYSTEM,
+              `用户输入：${phrase}\n（系统建议 match_mode=${suggested}；检索词必须是塞尔维亚语/英语原文；长意图请用 strict+match_groups）`,
+            )
         expandedPayload = normalizeExpand(phrase, raw)
         const normalized = expandedPayload.search_terms.join(' ').slice(0, 2000) || phrase
 
