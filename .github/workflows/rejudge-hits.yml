@@ -1,0 +1,59 @@
+name: Re-judge unverified hits
+
+# Manual cleanup after the model was unavailable and the crawl fell back to rules.
+# Default run only reports; tick `apply` to save verdicts and remove rejected hits.
+on:
+  workflow_dispatch:
+    inputs:
+      since:
+        description: Hits created at or after (ISO date)
+        default: "2026-10-01"
+        required: true
+      apply:
+        description: Save verdicts and remove rejected hits
+        type: boolean
+        default: false
+
+concurrency:
+  group: crawl-keyword-news
+  cancel-in-progress: false
+
+jobs:
+  rejudge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: crawler/requirements.txt
+      - run: pip install -r crawler/requirements.txt
+      - name: Re-judge
+        working-directory: crawler
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
+          AI_MODEL: ${{ vars.AI_MODEL }}
+          SINCE: ${{ inputs.since }}
+          APPLY: ${{ inputs.apply }}
+        run: |
+          export AI_BASE_URL="${AI_BASE_URL:-https://api.deepseek.com}"
+          export AI_MODEL="${AI_MODEL:-deepseek-flash}"
+          if [ "$APPLY" = "true" ]; then
+            python rejudge_hits.py --since "$SINCE" --apply
+          else
+            python rejudge_hits.py --since "$SINCE"
+          fi
+      - name: Keep removed hits for restore
+        if: inputs.apply
+        uses: actions/upload-artifact@v4
+        with:
+          name: removed-hits
+          path: crawler/removed_hits.json
+          retention-days: 90
