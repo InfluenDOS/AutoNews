@@ -1,0 +1,31 @@
+name: Crawl fallback
+
+# The Supabase schedule-dispatch watchdog starts crawl.yml every hour. This only
+# steps in when it has not (no crawl for 90 minutes), so it never doubles a crawl.
+on:
+  schedule:
+    # Avoid GitHub Actions' high-load period at the top of each hour.
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Start a crawl if none ran recently
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          since=$(date -u -d '-90 minutes' +%Y-%m-%dT%H:%M:%SZ)
+          recent=$(gh api "repos/$REPO/actions/workflows/crawl.yml/runs?per_page=5" \
+            --jq "[.workflow_runs[] | select(.created_at >= \"$since\")] | length")
+          echo "Crawl runs since $since: $recent"
+          if [ "$recent" -eq 0 ]; then
+            gh workflow run crawl.yml --repo "$REPO" --ref main
+            echo "Dispatched crawl.yml"
+          fi
