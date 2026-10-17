@@ -4,19 +4,30 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from postgrest.types import ReturnMethod
 
 from ai_client import AIUnavailable, ai_configured, chat_json
-from dedup import TITLE_JACCARD_THRESHOLD, published_close, title_jaccard, title_tokens
+from dedup import TITLE_JACCARD_THRESHOLD, published_close, title_jaccard
 from extract import clip_text
+from normalize import normalize_for_match
 
 STORY_DEDUP_BATCH = int(os.environ.get("STORY_DEDUP_BATCH", "8"))
 STORY_DEDUP_MAX_PAIRS = int(os.environ.get("STORY_DEDUP_MAX_PAIRS", "80"))
 RECENT_HOURS = int(os.environ.get("STORY_DEDUP_WINDOW_HOURS", "48"))
 WEAK_TOKEN_OVERLAP = 4
+# Shared words as a share of the shorter article's words. Two different stories on the
+# same running topic (an election, one politician) share a few names; reports of one
+# event share much more of their wording.
+WEAK_TOKEN_SHARE = 0.4
+# Words shorter than this are mostly function words (je, na, da, se, za, od): any two
+# Serbian summaries share four of them, which used to send nearly every pair to the model.
+MIN_CONTENT_TOKEN = 4
+# Bigram overlap of the two Chinese titles that is worth asking about.
+ZH_TITLE_WEAK = 0.3
 
 STORY_SYSTEM = """你是新闻去重审核员。判断两篇稿是否报道**同一新闻事件**：同一时间、地点、主体、动作。
 改写、翻译、详略不同、不同报社仍算同一件。
@@ -32,10 +43,34 @@ def pair_key(a: str, b: str) -> tuple[str, str]:
 
 
 def _content_tokens(row: dict[str, Any]) -> set[str]:
-    tokens: set[str] = set()
-    for key in ("title", "title_zh", "summary", "summary_zh"):
-        tokens.update(title_tokens(str(row.get(key) or "")))
-    return tokens
+    """Original-language words of title and summary, without the short function words.
+
+    Chinese text is left out: its bigrams overlap for any two stories naming the same
+    country and person (塞尔维亚 + 武契奇 alone are five shared bigrams).
+    """
+    text = " ".join(str(row.get(key) or "") for key in ("title", "summary"))
+    return {
+        word
+        for word in re.findall(r"\w+", normalize_for_match(text))
+        if len(word) >= MIN_CONTENT_TOKEN and not word.isdigit()
+    }
+
+
+def weak_score(a: dict[str, Any], b: dict[str, Any]) -> float:
+    """How likely two articles are one event; 0 when not worth an AI call."""
+    left = _content_tokens(a)
+    right = _content_tokens(b)
+    word_share = 0.0
+    if left and right:
+        shared = len(left & right)
+        if shared >= WEAK_TOKEN_OVERLAP:
+            word_share = shared / min(len(left), len(right))
+    if word_share < WEAK_TOKEN_SHARE:
+        word_share = 0.0
+    zh_score = title_jaccard(str(a.get("title_zh") or ""), str(b.get("title_zh") or ""))
+    if zh_score < ZH_TITLE_WEAK:
+        zh_score = 0.0
+    return max(word_share, zh_score)
 
 
 def classify_pair(a: dict[str, Any], b: dict[str, Any]) -> str:
@@ -54,11 +89,7 @@ def classify_pair(a: dict[str, Any], b: dict[str, Any]) -> str:
     )
     if max(original_score, zh_score) >= TITLE_JACCARD_THRESHOLD:
         return "same"
-    left = _content_tokens(a)
-    right = _content_tokens(b)
-    if not left or not right:
-        return "skip"
-    if len(left & right) >= WEAK_TOKEN_OVERLAP:
+    if weak_score(a, b) > 0:
         return "ai"
     return "skip"
 
@@ -131,6 +162,8 @@ def propose_pairs(
                 )
             elif kind == "ai":
                 ai_pairs.append((a, b))
+    # The per-run cap keeps the head of this list: spend it on the likeliest pairs.
+    ai_pairs.sort(key=lambda pair: -weak_score(*pair))
     return rule_rows, ai_pairs
 
 
@@ -369,8 +402,13 @@ def cluster_stories(
     *,
     score_fn: Callable[[list[tuple[dict[str, Any], dict[str, Any]]]], list[dict[str, Any]]]
     | None = None,
+    translated_only: bool = False,
 ) -> int:
-    """Compare focus articles to nearby ones and cache same-event verdicts."""
+    """Compare focus articles to nearby ones and cache same-event verdicts.
+
+    `translated_only` skips focus articles without a Chinese title: the translate step
+    clusters those once they have one, and a verdict, once cached, is never asked again.
+    """
     ids = [i for i in dict.fromkeys(focus_ids) if i]
     if not ids:
         return 0
@@ -379,7 +417,15 @@ def cluster_stories(
     articles = _load_articles(sb, pool_ids)
     if len(articles) < 2:
         return 0
-    focus = [a for a in articles if str(a.get("id") or "") in set(ids)]
+    id_set = set(ids)
+    focus = [
+        a
+        for a in articles
+        if str(a.get("id") or "") in id_set
+        and (not translated_only or str(a.get("title_zh") or "").strip())
+    ]
+    if not focus:
+        return 0
     existing = _load_existing_pairs(sb, pool_ids)
     readers = _load_readers(sb, pool_ids)
     rule_rows, ai_pairs = propose_pairs(focus, articles, existing, readers)

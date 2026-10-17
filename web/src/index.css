@@ -2130,3 +2130,78 @@ ol {
   border: 0;
   accent-color: var(--ink);
 }
+
+/* Keyword page: the keyword's sources, editable in place */
+.kw-sources {
+  margin: 14px 0 0;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+.kw-sources-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 0;
+}
+
+.kw-sources-edit {
+  margin-left: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.kw-sources-edit:hover {
+  color: var(--ink);
+}
+
+.kw-source-pick {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+
+.kw-source-pick legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.kw-source-pick label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.kw-source-pick input {
+  accent-color: var(--ink);
+}
+
+.kw-sources-hint {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.kw-sources-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.kw-sources-actions .btn {
+  min-height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+}

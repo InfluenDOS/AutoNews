@@ -11,6 +11,10 @@ concurrency:
   group: crawl-keyword-news
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   crawl:
     runs-on: ubuntu-latest
@@ -20,10 +24,29 @@ jobs:
       # Stream progress lines as they happen instead of all at step exit.
       PYTHONUNBUFFERED: "1"
     steps:
+      # The Supabase watchdog dispatches this workflow every hour; GitHub's own schedule
+      # is the fallback and often fires minutes after it, which crawled (and paid for
+      # the AI calls) twice in that hour. A scheduled run right after another one stops.
+      - name: Skip if a crawl just ran
+        id: gate
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          since=$(date -u -d '-40 minutes' +%Y-%m-%dT%H:%M:%SZ)
+          recent=$(gh api "repos/${{ github.repository }}/actions/workflows/crawl.yml/runs?per_page=5" \
+            --jq "[.workflow_runs[] | select(.id != ${{ github.run_id }} and .created_at >= \"$since\")] | length")
+          echo "Other crawl runs since $since: $recent"
+          if [ "$recent" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
+        if: steps.gate.outputs.skip != 'true'
         uses: actions/checkout@v4
 
       - name: Set up Python
+        if: steps.gate.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -31,9 +54,11 @@ jobs:
           cache-dependency-path: crawler/requirements.txt
 
       - name: Install dependencies
+        if: steps.gate.outputs.skip != 'true'
         run: pip install -r crawler/requirements.txt
 
       - name: AI expand keywords
+        if: steps.gate.outputs.skip != 'true'
         working-directory: crawler
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -48,6 +73,7 @@ jobs:
           python process_ai.py --keywords-only
 
       - name: Crawl RSS (match + relevance)
+        if: steps.gate.outputs.skip != 'true'
         working-directory: crawler
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -70,6 +96,7 @@ jobs:
           python crawl.py
 
       - name: Translate matched articles
+        if: steps.gate.outputs.skip != 'true'
         working-directory: crawler
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

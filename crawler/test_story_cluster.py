@@ -91,6 +91,52 @@ existing = {(similar["id"], similar2["id"]) if similar["id"] < similar2["id"] el
 rule3, ai3 = propose_pairs([similar], [similar, similar2], existing)
 check("existing pair not proposed again", (len(rule3), len(ai3)), (0, 0))
 
+# A running topic (an election, one politician) must not send every pair to the model.
+PUB_E = "2026-10-17T10:00:00+00:00"
+rally_a = {
+    "id": "bb000000-0000-0000-0000-000000000001",
+    "source": "Blic",
+    "title": "Vučić na skupu u Novom Sadu: Nećemo predati nijedan grad",
+    "summary": "Predsednik Srbije Aleksandar Vučić obratio se okupljenima na predizbornom "
+    "skupu SNS u Novom Sadu, gde je poručio da stranka neće predati nijedan grad.",
+    "published_at": PUB_E,
+}
+rally_b = {
+    "id": "bb000000-0000-0000-0000-000000000002",
+    "source": "Novosti",
+    "title": "Veliki skup SNS u Novom Sadu, Vučić poručio da neće dati nijedan grad",
+    "summary": "Na predizbornom skupu Srpske napredne stranke u Novom Sadu govorio je "
+    "Aleksandar Vučić, koji je rekao da nijedan grad neće biti predat.",
+    "published_at": PUB_E,
+}
+sanctions = {
+    "id": "bb000000-0000-0000-0000-000000000003",
+    "source": "RTS",
+    "title": "Vučić: Srbija neće uvesti sankcije Rusiji",
+    "title_zh": "武契奇：塞尔维亚不会对俄罗斯实施制裁",
+    "summary": "Predsednik Srbije Aleksandar Vučić izjavio je danas da Srbija neće uvesti "
+    "sankcije Rusiji uprkos pritiscima iz Brisela.",
+    "published_at": PUB_E,
+}
+highway = {
+    "id": "bb000000-0000-0000-0000-000000000004",
+    "source": "B92",
+    "title": "Vučić obišao radove na novoj deonici autoputa",
+    "title_zh": "武契奇视察塞尔维亚高速公路新路段施工",
+    "summary": "Predsednik Srbije Aleksandar Vučić obišao je radove na deonici autoputa "
+    "kod Čačka i najavio završetak do kraja godine.",
+    "published_at": PUB_E,
+}
+check("one rally in two outlets is AI candidate", classify_pair(rally_a, rally_b), "ai")
+check("same politician, different story is skip", classify_pair(sanctions, highway), "skip")
+check("shared boilerplate opening is skip", classify_pair(rally_a, sanctions), "skip")
+_, ai_ranked = propose_pairs([rally_a, sanctions], [rally_a, rally_b, sanctions, highway], set())
+check(
+    "only the rally pair reaches the model",
+    [tuple(sorted((l["id"], r["id"]))) for l, r in ai_ranked],
+    [(rally_a["id"], rally_b["id"])],
+)
+
 check("no reader map keeps every pair", shown_together("x", "y", None), True)
 check("shared reader keeps pair", shown_together("x", "y", {"x": {"u1"}, "y": {"u1", "u2"}}), True)
 check("disjoint readers drop pair", shown_together("x", "y", {"x": {"u1"}, "y": {"u2"}}), False)
@@ -211,5 +257,20 @@ wrote = cluster_stories(
 check("mock AI writes pairs", wrote >= 2, True)
 sames = [r for r in store["article_story_pairs"] if r.get("same")]
 check("mock AI marked same", len(sames) >= 2, True)
+
+untranslated = {**a, "id": "aa000000-0000-0000-0000-000000000021", "title_zh": ""}
+store_zh = {
+    "articles": [untranslated, b, c],
+    "article_hits": [{"user_id": "u1", "article_id": r["id"]} for r in (untranslated, b, c)],
+    "article_story_pairs": [],
+}
+sent_pairs: list = []
+cluster_stories(
+    _FakeSB(store_zh),
+    [untranslated["id"]],
+    score_fn=lambda pairs: sent_pairs.extend(pairs) or [],
+    translated_only=True,
+)
+check("untranslated focus waits for the translate step", sent_pairs, [])
 
 print("story_cluster tests passed")

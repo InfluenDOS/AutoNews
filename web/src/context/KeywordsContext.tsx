@@ -10,6 +10,7 @@ import {
 import { useAuth } from './AuthContext'
 import { keywordsSnapshotEqual } from '../lib/listSnapshot'
 import { normalizeForMatch } from '../lib/normalize'
+import { SERBIA_MAINSTREAM_KEY } from '../lib/sources'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { Keyword } from '../types'
 
@@ -18,10 +19,19 @@ type KeywordsContextValue = {
   loading: boolean
   refresh: (opts?: { quiet?: boolean }) => Promise<void>
   addKeyword: (phrase: string, sourceKeys?: string[]) => Promise<{ id?: string; error?: string }>
+  updateKeywordSources: (id: string, sourceKeys: string[]) => Promise<{ error?: string }>
   deleteKeyword: (id: string) => Promise<{ error?: string }>
 }
 
 const KeywordsContext = createContext<KeywordsContextValue | null>(null)
+
+// Only the custom (non-built-in) sources change the expansion prompt: without them
+// the keyword uses the Serbia prompt, with them the prompt names the outlets.
+function expandPromptKey(keys: string[] | null | undefined) {
+  const list = keys ?? []
+  if (!list.some((k) => k !== SERBIA_MAINSTREAM_KEY)) return ''
+  return [...new Set(list)].sort().join(',')
+}
 
 function isAiPending(k: Keyword) {
   return !(k.search_terms && k.search_terms.length > 0)
@@ -102,6 +112,35 @@ export function KeywordsProvider({ children }: { children: ReactNode }) {
     [user, refresh],
   )
 
+  const updateKeywordSources = useCallback(
+    async (id: string, sourceKeys: string[]) => {
+      if (!user || !isSupabaseConfigured) return { error: '请先登录' }
+      const before = keywords.find((k) => k.id === id)
+      const next = [...new Set(sourceKeys)]
+      // Re-expand only when the outlets in the prompt changed (their language decides
+      // the search terms); either way crawl now so the new sources are read.
+      const force = expandPromptKey(before?.source_keys) !== expandPromptKey(next)
+      const { error } = await supabase
+        .from('keywords')
+        .update({
+          // Empty = every source, stored as NULL like a keyword that never chose.
+          source_keys: next.length > 0 ? next : null,
+          // Marks the terms stale, so the hourly crawl re-expands them if the call
+          // below fails; a successful expand sets the version back.
+          ...(force ? { expand_version: 0 } : {}),
+        })
+        .eq('id', id)
+      if (error) return { error: error.message }
+      const { error: fnErr } = await supabase.functions.invoke('expand-keyword', {
+        body: { keyword_id: id, trigger_crawl: true, force },
+      })
+      if (fnErr) console.warn('expand-keyword failed', fnErr)
+      await refresh()
+      return {}
+    },
+    [user, keywords, refresh],
+  )
+
   const deleteKeyword = useCallback(
     async (id: string) => {
       if (!user || !isSupabaseConfigured) return { error: '请先登录' }
@@ -114,8 +153,8 @@ export function KeywordsProvider({ children }: { children: ReactNode }) {
   )
 
   const value = useMemo(
-    () => ({ keywords, loading, refresh, addKeyword, deleteKeyword }),
-    [keywords, loading, refresh, addKeyword, deleteKeyword],
+    () => ({ keywords, loading, refresh, addKeyword, updateKeywordSources, deleteKeyword }),
+    [keywords, loading, refresh, addKeyword, updateKeywordSources, deleteKeyword],
   )
 
   return <KeywordsContext.Provider value={value}>{children}</KeywordsContext.Provider>

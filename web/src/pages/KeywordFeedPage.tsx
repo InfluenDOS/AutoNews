@@ -4,6 +4,11 @@ import { ArticleCard } from '../components/ArticleCard'
 import { FeedPager } from '../components/FeedPager'
 import { DispatchList } from '../components/DispatchList'
 import { PageHead } from '../components/PageHead'
+import {
+  keywordSourcesLabel,
+  SourcePicker,
+  useKeywordSourceOptions,
+} from '../components/SourcePicker'
 import { useAuth } from '../context/AuthContext'
 import { useJobs, useJobsRefresh, useJobsStatus } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
@@ -187,6 +192,87 @@ function CrawlButton({
         {crawl.busy ? '触发中…' : '手动抓取'}
       </button>
       {crawl.error && <p className="form-error">{crawl.error}</p>}
+    </div>
+  )
+}
+
+/** The keyword's source scope, editable in place. */
+function KeywordSources({ keyword }: { keyword: Keyword }) {
+  const { updateKeywordSources } = useKeywords()
+  const refreshJobs = useJobsRefresh()
+  const options = useKeywordSourceOptions()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const keys = keyword.source_keys ?? []
+
+  // Nothing to choose between, and nothing chosen to undo.
+  if (options.length < 2 && keys.length === 0) return null
+
+  function startEdit() {
+    // Sources deleted since are dropped from the choice instead of kept invisibly.
+    setDraft(keys.filter((k) => options.some((o) => o.key === k)))
+    setError(null)
+    setEditing(true)
+  }
+
+  async function save() {
+    setBusy(true)
+    setError(null)
+    const result = await updateKeywordSources(keyword.id, draft)
+    void refreshJobs()
+    setBusy(false)
+    if (result.error) {
+      setError(result.error)
+      return
+    }
+    setEditing(false)
+  }
+
+  const unchanged = sameStringSet(new Set(draft), new Set(keys))
+
+  return (
+    <div className="kw-sources">
+      {editing ? (
+        <>
+          <SourcePicker
+            className="kw-source-pick"
+            options={options}
+            value={draft}
+            onChange={setDraft}
+            disabled={busy}
+          />
+          <p className="kw-sources-hint">只影响之后的抓取；已在订阅里的报道会保留。</p>
+          <div className="kw-sources-actions">
+            <button
+              type="button"
+              className="btn btn-solid"
+              disabled={busy || unchanged}
+              onClick={() => void save()}
+            >
+              {busy ? '保存中…' : '保存'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={busy}
+              onClick={() => setEditing(false)}
+            >
+              取消
+            </button>
+          </div>
+          {error && <p className="form-error">{error}</p>}
+        </>
+      ) : (
+        <p className="kw-sources-line">
+          <span className="lead-label">抓取源</span>
+          {keywordSourcesLabel(keys, options)}
+          <button type="button" className="kw-sources-edit" onClick={startEdit}>
+            修改
+          </button>
+        </p>
+      )}
     </div>
   )
 }
@@ -599,6 +685,8 @@ export function KeywordFeedPage({ all = false }: Props) {
         }
         actions={<CrawlButton keywordId={all ? null : keyword?.id} onTriggered={onCrawlTriggered} />}
       />
+
+      {!all && keyword && <KeywordSources keyword={keyword} />}
 
       {error && <p className="notice notice-error">{error}</p>}
 

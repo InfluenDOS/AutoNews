@@ -4,6 +4,7 @@ from process_ai import (
     CATCH_UP_MARK,
     article_needs_zh,
     is_catch_up_row,
+    is_movie_preview,
     pick_translate_batch,
 )
 
@@ -67,6 +68,19 @@ def test_pick_translate_batch_does_not_inflate_token_budget():
     )
     assert len(batch) == 40
     assert sum(1 for r in batch if str(r["id"]).startswith("c")) == 8
+
+
+def test_only_film_previews_are_rewritten():
+    assert is_movie_preview({"source": "Variety", "title": "Q3 earnings", "summary": ""})
+    assert is_movie_preview(
+        {"source": "Novosti Kultura", "title": "Нови филм Кустурице", "summary": ""}
+    )
+    assert is_movie_preview(
+        {"source": "Blic Kultura", "title": "Premijera", "summary": "Poznati režiser snima u Beogradu"}
+    )
+    assert not is_movie_preview(
+        {"source": "Blic Zabava", "title": "Pevačica proslavila rođendan", "summary": "Žurka do zore."}
+    )
 
 
 if __name__ == "__main__":

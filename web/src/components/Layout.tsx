@@ -4,10 +4,10 @@ import { useAuth } from '../context/AuthContext'
 import { useJobsRefresh } from '../context/JobsContext'
 import { keywordAiReady, useKeywords } from '../context/KeywordsContext'
 import { useSources } from '../context/SourcesContext'
-import { SERBIA_MAINSTREAM_KEY } from '../lib/sources'
 import { useHalfHourPoem } from '../hooks/useHalfHourPoem'
 import { FALLBACK_POEM } from '../lib/poems'
 import { ProcessBanner } from './ProcessBanner'
+import { keywordSourcesLabel, SourcePicker, useKeywordSourceOptions } from './SourcePicker'
 import { BrandLogo } from './BrandLogo'
 import { ThemeToggle } from './ThemeToggle'
 import {
@@ -27,6 +27,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { user, signOut, configured } = useAuth()
   const { keywords, addKeyword, deleteKeyword } = useKeywords()
   const { items: sourceItems, addSource, deleteSource } = useSources()
+  const pickableSources = useKeywordSourceOptions()
   const refreshJobs = useJobsRefresh()
   const navigate = useNavigate()
   const location = useLocation()
@@ -222,15 +223,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
     if (location.pathname === `/s/${id}`) navigate('/sources')
   }
 
-  // Sources a new keyword can be limited to: the built-in set plus ready custom ones.
-  const pickableSources = sourceItems
-    .filter((s) => s.status === 'ready' && (s.kind === 'preset' || s.feeds.length > 0))
-    .map((s) => ({ key: s.kind === 'preset' ? SERBIA_MAINSTREAM_KEY : s.id, label: s.label }))
-  const sourceLabel = new Map(pickableSources.map((s) => [s.key, s.label]))
   function keywordTitle(k: { phrase: string; source_keys?: string[] | null }) {
-    const keys = k.source_keys ?? []
-    if (keys.length === 0) return k.phrase
-    return `${k.phrase}\n抓取源：${keys.map((key) => sourceLabel.get(key) ?? '已删除的源').join('、')}`
+    if (!k.source_keys?.length) return k.phrase
+    return `${k.phrase}\n抓取源：${keywordSourcesLabel(k.source_keys, pickableSources)}`
   }
 
   const today = new Intl.DateTimeFormat('zh-CN', {
@@ -364,25 +359,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
                         {addBusy ? '…' : '添加'}
                       </button>
                       {pickableSources.length > 1 && (
-                        <fieldset className="rail-source-pick" disabled={addBusy}>
-                          <legend>抓取源{draftSources.length === 0 ? '（不选 = 全部）' : ''}</legend>
-                          {pickableSources.map((s) => (
-                            <label key={s.key}>
-                              <input
-                                type="checkbox"
-                                checked={draftSources.includes(s.key)}
-                                onChange={(e) =>
-                                  setDraftSources((prev) =>
-                                    e.target.checked
-                                      ? [...prev, s.key]
-                                      : prev.filter((k) => k !== s.key),
-                                  )
-                                }
-                              />
-                              <span>{s.label}</span>
-                            </label>
-                          ))}
-                        </fieldset>
+                        <SourcePicker
+                          className="rail-source-pick"
+                          options={pickableSources}
+                          value={draftSources}
+                          onChange={setDraftSources}
+                          disabled={addBusy}
+                        />
                       )}
                       {addError && <p className="form-error">{addError}</p>}
                     </form>

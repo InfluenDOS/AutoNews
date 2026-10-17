@@ -324,6 +324,44 @@ TRANSLATE_LIMIT = 40
 # Reserved slots inside TRANSLATE_LIMIT for failures / old deferred hits.
 CATCH_UP_MAX = 8
 CATCH_UP_MARK = "awaiting_catchup"
+# Guest preview rows rewritten per run. The guest page shows 8 random film stories from
+# this pool, so a few a run keep it fresh; filling the whole spare budget rewrote every
+# culture / showbiz item the preview feeds published.
+PREVIEW_TRANSLATE_MAX = 4
+# What the guest page counts as a film story (keep in sync with MOVIE_TERMS in
+# web/src/pages/KeywordsPage.tsx; Chinese terms only apply after the rewrite).
+PREVIEW_MOVIE_SOURCES = ("variety",)
+PREVIEW_MOVIE_TERMS = (
+    "film",
+    "movie",
+    "cinema",
+    "bioskop",
+    "hollywood",
+    "holivud",
+    "oscar",
+    "netflix",
+    "kino",
+    "glumac",
+    "glumica",
+    "reziser",
+    "režiser",
+    "box office",
+    "trailer",
+    "festival",
+    "premiere",
+    "actor",
+    "actress",
+    "director",
+)
+
+
+def is_movie_preview(row: dict[str, Any]) -> bool:
+    """Would the guest preview show this row? Unshown rows are not worth a rewrite."""
+    source = str(row.get("source") or "").casefold()
+    if any(hint in source for hint in PREVIEW_MOVIE_SOURCES):
+        return True
+    blob = normalize_for_match(f"{row.get('title') or ''}\n{row.get('summary') or ''}")
+    return any(term in blob for term in PREVIEW_MOVIE_TERMS)
 
 
 def article_needs_zh(row: dict[str, Any], *, with_body: bool) -> bool:
@@ -616,7 +654,7 @@ def translate_articles(
             # their cached verdicts) and must never be sent for rewriting.
             q = (
                 sb.table("articles")
-                .select(columns)
+                .select(f"{columns}, source")
                 .in_("source", sorted(PREVIEW_SOURCE_NAMES))
                 .order("published_at", desc=True)
                 .limit(limit)
@@ -624,6 +662,8 @@ def translate_articles(
             if not force:
                 q = q.eq("title_zh", "")
             extra = q.execute().data or []
+            if not force:
+                extra = [r for r in extra if is_movie_preview(r)][:PREVIEW_TRANSLATE_MAX]
             fresh_rows.extend(extra)
         except Exception as exc:  # noqa: BLE001
             print(f"  warn: fresh pending scan failed: {exc}", file=sys.stderr)

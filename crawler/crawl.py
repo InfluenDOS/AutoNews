@@ -260,6 +260,31 @@ def resolve_article_ids(sb: Client, urls: list[str]) -> dict[str, str]:
     return out
 
 
+def new_hit_article_ids(sb: Client, hits: list[dict[str, str]]) -> list[str]:
+    """Articles of the hits not yet in article_hits (relevance re-returns cached ones)."""
+    by_user: dict[str, set[str]] = {}
+    for h in hits:
+        by_user.setdefault(h["user_id"], set()).add(h["article_id"])
+    new: list[str] = []
+    for uid, aids in by_user.items():
+        ids = sorted(aids)
+        known: set[str] = set()
+        for i in range(0, len(ids), 100):
+            chunk = ids[i : i + 100]
+            rows = (
+                sb.table("article_hits")
+                .select("article_id")
+                .eq("user_id", uid)
+                .in_("article_id", chunk)
+                .execute()
+                .data
+                or []
+            )
+            known |= {str(r["article_id"]) for r in rows}
+        new.extend(a for a in ids if a not in known)
+    return list(dict.fromkeys(new))
+
+
 def merge_hits(sb: Client, hits: list[dict[str, str]]) -> int:
     """Append new matches; never remove existing hits (user feed is cumulative)."""
     if not hits:
@@ -480,11 +505,18 @@ def crawl() -> None:
 
     # ——— Pass 3: AI decides relevance; keywords never write hits by themselves ———
     hits = filter_matches_with_relevance(sb, matches=stage1_matches)
+    try:
+        cluster_ids = new_hit_article_ids(sb, hits)
+    except Exception as exc:  # noqa: BLE001
+        print(f"new hit lookup failed: {exc}")
+        cluster_ids = []
     inserted = merge_hits(sb, hits)
-    cluster_ids = list({h["article_id"] for h in hits if h.get("article_id")})
+    # Only hits new this run: older ones were grouped when they arrived, and re-sending
+    # them kept the same-event check at its pair cap on every crawl. New hits that still
+    # need a Chinese rewrite are grouped by the translate step, which sees that text.
     if cluster_ids:
         try:
-            cluster_stories(sb, cluster_ids)
+            cluster_stories(sb, cluster_ids, translated_only=True)
         except Exception as exc:  # noqa: BLE001
             print(f"story_cluster after crawl failed: {exc}")
     # The retract pass re-reads every approved article (with body) to re-apply
